@@ -1,1 +1,70 @@
-:root{--bg:#f3f5f2;--ink:#17231f;--muted:#738079;--green:#173f32;--lime:#c8f36a;--white:#fff;--line:#dde3de;--red:#c55443;--blue:#426f91}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,"Noto Sans JP",system-ui,sans-serif}.sidebar{position:fixed;inset:0 auto 0 0;width:230px;background:#10271f;color:#e9f2ed;padding:28px 18px;display:flex;flex-direction:column}.brand{display:flex;gap:12px;align-items:center;font-weight:800;letter-spacing:.08em;margin:0 10px 40px}.brand>span{display:grid;place-items:center;width:36px;height:36px;border:1px solid #6a8a7d;border-radius:50%;color:var(--lime);font-family:serif;font-size:24px}.brand small{display:block;color:#8fa69c;font-size:10px;margin-top:4px;letter-spacing:.14em}nav{display:grid;gap:8px}nav button{border:0;background:transparent;color:#9eb2aa;padding:13px 14px;text-align:left;border-radius:9px;font-weight:700;cursor:pointer}nav button.active,nav button:hover{background:#23483b;color:#fff}.sidebar-foot{margin-top:auto;border-top:1px solid #345246;padding:20px 10px 0;color:#c8d7d1;font-size:13px;line-height:1.8}.sidebar-foot i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 10px var(--lime)}.sidebar-foot small{color:#779188;margin-left:14px}main{margin-left:230px;padding:34px 42px;max-width:1500px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:30px}.eyebrow{color:#819089;font-size:10px;letter-spacing:.18em;font-weight:800;margin:0 0 4px}h1{font-family:Georgia,"Noto Serif JP",serif;font-size:32px;margin:0}.header-meta{text-align:right;display:grid;gap:6px}.header-meta span{color:#557067;font-size:12px}.header-meta b{font-size:12px}.page{display:none}.page.active{display:block}.hero{min-height:190px;border-radius:18px;background:var(--green);color:#fff;padding:34px 38px;display:flex;justify-content:space-between;overflow:hidden}.hero p{color:#b4c9c0;margin:0 0 15px}.hero strong{display:block;color:var(--lime);font:700 46px Georgia,serif}.hero small{color:#90aa9f}.hero-chart{width:48%;display:flex;align-items:end;gap:8px;padding:25px 0 10px}.bar{flex:1;background:#386253;border-radius:5px 5px 0 0;min-height:15px}.bar.hot{background:var(--lime)}.strategy-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:18px 0}.card,.panel{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:22px}.card-top{display:flex;justify-content:space-between;align-items:center}.badge{padding:5px 9px;border-radius:20px;font-size:11px;font-weight:800}.badge.conservative{background:#e2eef2;color:#315d70}.badge.balanced{background:#edf1df;color:#5b672e}.badge.aggressive{background:#f7e7df;color:#944e3a}.card h3{font-size:13px;margin:18px 0 7px;color:var(--muted)}.card strong{font:700 28px Georgia,serif}.positive{color:#287356}.negative{color:var(--red)}.stats{display:flex;gap:24px;border-top:1px solid var(--line);margin-top:16px;padding-top:14px}.stats small{color:var(--muted);display:block}.stats b{font-size:13px}.two-col{display:grid;grid-template-columns:1.6fr 1fr;gap:16px}.panel-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.panel-title h2{margin:0;font:700 18px Georgia,serif}.panel-title span{color:var(--muted);font-size:12px}.panel-title .ok{color:#35745d;background:#e5f2ec;padding:5px 9px;border-radius:20px}.line-chart{height:210px;display:flex;align-items:end;gap:2px;border-bottom:1px solid var(--line);background:repeating-linear-gradient(to bottom,transparent,transparent 49px,#eef1ee 50px)}.line-point{flex:1;background:#2c604d;border-radius:2px 2px 0 0;opacity:.85}.job{display:grid;grid-template-columns:24px 1fr auto;gap:10px;padding:12px 0;border-bottom:1px solid #edf0ed;align-items:center}.job:last-child{border:0}.job i{display:grid;place-items:center;background:#e6f1eb;color:#367158;width:22px;height:22px;border-radius:50%;font-style:normal}.job b{font-size:13px}.job small{display:block;color:var(--muted);margin-top:3px}.job time{font-size:11px;color:var(--muted)}.tabs{display:flex;gap:8px;margin-bottom:16px}.tabs button{border:1px solid var(--line);background:#fff;padding:10px 18px;border-radius:20px;font-weight:800;cursor:pointer}.tabs button.active{background:var(--green);color:#fff}.race-list{display:grid;gap:12px}.race{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px;display:grid;grid-template-columns:150px 1fr 240px;gap:22px;align-items:center}.race-id{border-right:1px solid var(--line)}.race-id small{color:var(--muted)}.race-id strong{display:block;font:700 20px Georgia,serif;margin:6px 0}.race-main h3{margin:0 0 8px}.race-main p{margin:0;color:var(--muted);font-size:13px}.bets{display:flex;gap:7px;flex-wrap:wrap;margin-top:13px}.bet{background:#edf2ee;padding:6px 9px;border-radius:6px;font-size:12px;font-weight:700}.race-result{text-align:right}.race-result strong{font-size:17px}.race-result small{display:block;color:var(--muted);margin-top:5px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}.metric{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px}.metric small{color:var(--muted)}.metric strong{display:block;font-size:22px;margin-top:8px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:14px 12px;border-bottom:1px solid var(--line);font-size:13px}th{color:var(--muted);font-size:11px;letter-spacing:.06em}.audit-row{display:grid;grid-template-columns:150px 1fr 100px;gap:20px;padding:16px 0;border-bottom:1px solid var(--line)}.audit-row b,.audit-row span{font-size:13px}.audit-row small{color:var(--muted);display:block;margin-top:5px}.audit-row em{font-style:normal;color:#287356;text-align:right;font-size:12px}@media(max-width:950px){.sidebar{position:static;width:auto;height:auto}.sidebar nav{grid-template-columns:repeat(4,1fr)}.sidebar-foot{display:none}main{margin:0;padding:24px}.strategy-grid,.two-col{grid-template-columns:1fr}.race{grid-template-columns:1fr}.race-id{border:0}.metrics{grid-template-columns:1fr 1fr}}@media(max-width:600px){.sidebar nav{grid-template-columns:1fr 1fr}header{align-items:flex-start}.header-meta{display:none}.hero{display:block}.hero-chart{width:100%;height:100px}.strategy-grid,.metrics{grid-template-columns:1fr}.race-result{text-align:left}}
+export type Strategy = "conservative" | "balanced" | "aggressive";
+export type BetType = "win" | "place" | "wide" | "quinella" | "exacta" | "trio" | "trifecta";
+
+export interface RaceOdds {
+  type: BetType;
+  horses: number[];
+  odds: number;
+  oddsMax?: number;
+  popularity?: number;
+}
+
+export interface RaceSummary {
+  externalId: string;
+  raceDate: string;
+  track: string;
+  raceNumber: number;
+  raceName: string;
+  startTime: string;
+  surface?: "turf" | "dirt" | "jump";
+  distance?: number;
+  condition?: string;
+  weather?: string;
+  runnerCount?: number;
+  sourceUrl: string;
+}
+
+export interface Entry {
+  horseNumber: number;
+  gateNumber?: number;
+  horseName: string;
+  sex?: string;
+  age?: number;
+  jockey?: string;
+  trainer?: string;
+  weightCarried?: number;
+  horseWeight?: number;
+  horseWeightDelta?: number;
+  winOdds?: number;
+  placeOddsLow?: number;
+  placeOddsHigh?: number;
+  popularity?: number;
+  sourceData: Record<string, number | string | null>;
+}
+
+export interface RaceDetail extends RaceSummary {
+  entries: Entry[];
+  pastRuns: Record<string, PastRun[]>;
+}
+
+export interface PastRun {
+  raceDate?: string;
+  track?: string;
+  raceName?: string;
+  surface?: string;
+  distance?: number;
+  condition?: string;
+  finishPosition?: number;
+  popularity?: number;
+  odds?: number;
+  finishTime?: string;
+  last3f?: number;
+  jockey?: string;
+  weightCarried?: number;
+  horseWeight?: number;
+}
+
+export interface RaceDataProvider {
+  getRaceList(date: string): Promise<RaceSummary[]>;
+  getRaceDetail(race: RaceSummary): Promise<RaceDetail>;
+}
