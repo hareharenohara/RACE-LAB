@@ -1,7 +1,10 @@
 import { createClient } from "jsr:@supabase/supabase-js@2.110.8";
 import { JraProvider } from "../_shared/jra-provider.ts";
 import { callGemini, MODEL } from "../_shared/gemini-client.ts";
-import { evaluateRace } from "../_shared/horse-evaluation.ts";
+import {
+  evaluateRace,
+  type EvaluationWeights,
+} from "../_shared/horse-evaluation.ts";
 import {
   PREDICTION_SCHEMA,
   SELECTION_SCHEMA,
@@ -305,6 +308,59 @@ Deno.serve(async (req) => {
       });
       pastRunsByHorse.set(externalId, history);
     }
+    const { data: weightProfile, error: weightError } = await db.from(
+      "evaluation_weight_profiles",
+    ).select(
+      "id,ability_weight,suitability_weight,condition_weight,race_context_weight",
+    ).eq("is_active", true).single();
+    if (weightError) throw weightError;
+    const evaluationWeights: EvaluationWeights = {
+        ability: Number(weightProfile.ability_weight),
+        suitability: Number(weightProfile.suitability_weight),
+        condition: Number(weightProfile.condition_weight),
+        raceContext: Number(weightProfile.race_context_weight),
+      },
+      evaluationsByRace = new Map<string, ReturnType<typeof evaluateRace>>();
+    for (const id of chosen) {
+      const detail = details.get(id)!,
+        evaluations = evaluateRace(
+          detail.race,
+          detail.entries,
+          pastRunsByHorse,
+          evaluationWeights,
+        );
+      evaluationsByRace.set(id, evaluations);
+      const snapshots = evaluations.flatMap((evaluation) => {
+        const entry = detail.entries.find((item) =>
+            item.horseNumber === evaluation.horseNumber
+          ),
+          horseId = entry
+            ? horseDbIds.get(String(entry.umaxScores.horse_id))
+            : undefined;
+        return horseId
+          ? [{
+            race_id: id,
+            horse_id: horseId,
+            horse_number: evaluation.horseNumber,
+            ability_score: evaluation.abilityScore,
+            suitability_score: evaluation.suitabilityScore,
+            condition_score: evaluation.conditionScore,
+            race_context_score: evaluation.raceContextScore,
+            overall_score: evaluation.overallScore,
+            estimated_win_probability: evaluation.estimatedWinProbability,
+            data_quality: evaluation.dataQuality,
+            features: evaluation.features,
+            weight_profile_id: weightProfile.id,
+          }]
+          : [];
+      });
+      if (snapshots.length) {
+        const { error: snapshotError } = await db.from(
+          "horse_evaluation_snapshots",
+        ).upsert(snapshots, { onConflict: "race_id,horse_id" });
+        if (snapshotError) throw snapshotError;
+      }
+    }
     let pc = 0, bc = 0;
     for (const s of STRATEGIES) {
       const ids = new Set(sel[s].map((x) => x.race_id)),
@@ -314,7 +370,7 @@ Deno.serve(async (req) => {
             race_id: id,
             race: d.race,
             entries: d.entries,
-            evaluations: evaluateRace(d.race, d.entries, pastRunsByHorse),
+            evaluations: evaluationsByRace.get(id)!,
             odds: d.odds.sort((a, b) =>
               (a.popularity ?? 9999) - (b.popularity ?? 9999)
             ).slice(0, 350),
