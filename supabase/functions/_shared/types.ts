@@ -67,6 +67,7 @@ export interface PastRun {
   odds?: number;
   finishTime?: string;
   last3f?: number;
+  margin?: number;
   jockey?: string;
   weightCarried?: number;
   horseWeight?: number;

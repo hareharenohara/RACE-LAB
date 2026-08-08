@@ -1,4 +1,4 @@
-import { evaluateRace } from "./horse-evaluation.ts";
+import { buildHorseFeatures, evaluateRace } from "./horse-evaluation.ts";
 import type { Entry, PastRun, RaceSummary } from "./types.ts";
 
 const assert = (condition: boolean, message: string) => {
@@ -77,4 +77,60 @@ Deno.test("current popularity does not affect the evaluation", () => {
 Deno.test("missing history lowers data quality", () => {
   const result = evaluateRace(race, [entry("new", 1)], new Map())[0];
   assert(result.dataQuality < 0.5, "missing history should be low quality");
+});
+
+Deno.test("feature engineering exposes suitability, trend, and workload", () => {
+  const history: PastRun[] = [
+    {
+      raceDate: "2026-07-25",
+      track: race.track,
+      surface: race.surface,
+      distance: race.distance,
+      condition: race.condition,
+      finishPosition: 1,
+      runnerCount: 16,
+      last3f: 33.8,
+      margin: 0.5,
+      jockey: "騎手A",
+      weightCarried: 55,
+    },
+    {
+      raceDate: "2026-06-20",
+      track: race.track,
+      surface: race.surface,
+      distance: 1800,
+      condition: race.condition,
+      finishPosition: 2,
+      runnerCount: 14,
+      last3f: 34.2,
+      margin: 0.1,
+      jockey: "騎手A",
+      weightCarried: 55,
+    },
+    ...runs([10, 11, 12]).map((run) => ({
+      ...run,
+      track: "中山",
+      surface: "dirt",
+      distance: 1200,
+      condition: "heavy",
+      jockey: "騎手B",
+    })),
+  ];
+  const features = buildHorseFeatures(entry("fit", 1), race, history);
+  assert(features.surfaceFit > 60, "surface fit");
+  assert(features.distanceFit > 80, "distance fit");
+  assert(features.courseFit > 80, "course fit");
+  assert(features.formTrend > 70, "improving trend");
+  assert(features.closingPerformance > 55, "closing performance");
+  assert(features.marginPerformance > 45, "margin performance");
+  assert(features.jockeyPartnership > 80, "jockey partnership");
+  assert(features.weightCarriedChange === 1, "weight carried change");
+  assert(features.layoffDays === 14, "layoff days");
+});
+
+Deno.test("evaluation includes neutral features when history is missing", () => {
+  const result = evaluateRace(race, [entry("new", 1)], new Map())[0];
+  assert(result.features.recentForm === 50, "neutral recent form");
+  assert(result.features.weightCarriedChange === null, "unknown workload");
+  assert(result.features.layoffDays === null, "unknown layoff");
 });
