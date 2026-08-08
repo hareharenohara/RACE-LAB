@@ -17,6 +17,10 @@ import {
   calibrateProbability,
   type CalibrationProfile,
 } from "../_shared/probability-calibrator.ts";
+import {
+  STRATEGY_POLICIES,
+  strategyPrompt,
+} from "../_shared/strategy-policy.ts";
 const json = (x: unknown, s = 200) =>
     new Response(JSON.stringify(x), {
       status: s,
@@ -160,9 +164,9 @@ Deno.serve(async (req) => {
         batch.id,
         "screening",
         null,
-        `JRA中央競馬の一覧から保守型・バランス型・積極型ごとに最大3レースを選定。無理に選ばず空配列可。race_id厳守。\n${
-          JSON.stringify(screenInput)
-        }`,
+        `JRA中央競馬の一覧から保守型・バランス型・積極型ごとに最大3レースを選定。各戦略の目的と許容リスクに合い、後段の条件を満たす買い目が見込めるレースを優先。無理に選ばず空配列可。race_id厳守。戦略条件=${
+          JSON.stringify(STRATEGY_POLICIES)
+        }\n${JSON.stringify(screenInput)}`,
         SELECTION_SCHEMA,
       ),
       valid = new Set(screenInput.map((r) => String(r.race_id))),
@@ -397,9 +401,9 @@ Deno.serve(async (req) => {
           batch.id,
           "prediction",
           s,
-          `JRAの${s}戦略。残高${
-            account?.current_balance ?? 100000
-          }円。evaluationsは過去走から決定論的に計算した総合評価で、オッズや現在人気を含まない。estimatedWinProbabilityと市場オッズから期待値を判断し、dataQualityが0.6未満なら原則SKIP。入力にある買い目だけ100円単位で提案。各買い目にreason（評価値とオッズに基づく具体的理由）とstake_reason（期待値・確率・戦略・残高に基づく購入金額の根拠）を必ず記載。弱ければSKIP。\n${
+          `${
+            strategyPrompt(s, Number(account?.current_balance ?? 100000))
+          } evaluationsは過去走から決定論的に計算した総合評価で、オッズや現在人気を含まない。入力にある買い目だけ提案。各買い目にreason（評価値とオッズに基づく具体的理由）とstake_reason（期待値・確率・戦略・残高に基づく購入金額の根拠）を必ず記載。\n${
             JSON.stringify(input)
           }`,
           PREDICTION_SCHEMA,
@@ -417,6 +421,8 @@ Deno.serve(async (req) => {
           market.set(`${x.race_id}:${ok(o.type, o.horses)}`, o.odds);
         }
       }
+      const policy = STRATEGY_POLICIES[s];
+      let dayStake = 0;
       for (const p of checked.predictions) {
         const { data: pred, error: pe } = await db.from("predictions").insert({
           race_id: p.race_id,
@@ -432,9 +438,19 @@ Deno.serve(async (req) => {
         }).select("id").single();
         if (pe) throw pe;
         pc++;
+        let raceStake = 0;
         for (const b of p.bets as any[]) {
           const odds = market.get(`${p.race_id}:${ok(b.type, b.horses)}`);
           if (!odds) throw new Error("ODDS_NOT_FOUND");
+          if (!policy.allowedBetTypes.includes(b.type)) continue;
+          const evaluations = evaluationsByRace.get(String(p.race_id)) ?? [],
+            quality = Math.min(
+              ...b.horses.map((horse: number) =>
+                evaluations.find((x) => x.horseNumber === horse)?.dataQuality ??
+                  0
+              ),
+            );
+          if (quality < policy.minimumDataQuality) continue;
           const calibration = calibrations.get(`${s}:${b.type}`),
             rawProbability = Number(b.estimated_probability),
             estimatedProbability = calibrateProbability(
@@ -442,14 +458,22 @@ Deno.serve(async (req) => {
               rawProbability,
             ),
             expectedValue = odds * estimatedProbability;
-          if (expectedValue < 1) continue;
+          if (expectedValue < policy.minimumExpectedValue) continue;
+          const stake = Math.floor(
+            Math.min(
+              Number(b.stake),
+              policy.maxStakePerRace - raceStake,
+              policy.maxStakePerDay - dayStake,
+            ) / 100,
+          ) * 100;
+          if (stake < 100) continue;
           await db.from("bets").insert({
             prediction_id: pred.id,
             race_id: p.race_id,
             strategy: s,
             bet_type: b.type,
             combination: b.horses,
-            stake: b.stake,
+            stake,
             odds_at_prediction: odds,
             raw_estimated_probability: rawProbability,
             estimated_probability: estimatedProbability,
@@ -458,6 +482,8 @@ Deno.serve(async (req) => {
             reason: b.reason,
             stake_reason: b.stake_reason,
           });
+          raceStake += stake;
+          dayStake += stake;
           bc++;
         }
       }
