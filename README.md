@@ -8,19 +8,21 @@ JRA中央競馬を対象に、3戦略（保守型・バランス型・積極型�
 - `supabase/schema.sql`: Supabaseデータベース定義とRLS
 - `supabase/functions/_shared/jra-provider.ts`: JRAレース・出馬表・オッズ取得
 - `supabase/functions/_shared/ai-contracts.ts`: Gemini出力の検証定義
-- `supabase/functions/jra-weekend-daily/index.ts`: 土日朝のJRA取得・選定・予想バッチ
-- `supabase/cron.sql`: 土日07:00 JSTの自動実行設定
+- `supabase/functions/jra-weekend-daily/index.ts`: JRA開催日の取得・選定・予想バッチ
+- `supabase/functions/jra-results-live/index.ts`: 着順・払戻取得と買い目の自動精算
+- `supabase/cron.sql`: 毎日07:00 JSTの開催確認設定
 
 ## 運用
 
-1. 土曜分は土曜07:00、日曜分は日曜07:00に取得します。
-2. Geminiはレース選定1回と、戦略別予想3回の計4回を基本とします。
-3. 各戦略は最大3レース、券種は7種類です。
-4. 開始資金は各戦略10万円で、残高がマイナスでも検証を継続します。
+1. 毎日07:00に開催有無を確認し、土日・祝日などJRA開催日のみ予想します。
+2. 開催なしの日はレース一覧の確認だけで終了し、Gemini APIは使用しません。
+3. Geminiはレース選定1回と、戦略別予想3回の計4回を基本とします。
+4. 各戦略は最大3レース、券種は7種類です。
+5. 開始資金は各戦略10万円で、残高がマイナスでも検証を継続します。
+6. 発走後の未確定レースを10分間隔で確認し、確定後に収支を反映します。
 
 APIキー、Supabaseのsecret key、`BATCH_SECRET`はリポジトリへ保存しません。
 
 ## 現在の制約
 
-- JRAの結果取得と自動精算は未実装です。
 - データ取得元は非公式エンドポイントのため、仕様変更時は取得処理の更新が必要です。
