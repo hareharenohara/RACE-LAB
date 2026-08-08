@@ -119,7 +119,7 @@ create table public.app_settings (
   id boolean primary key default true check(id), model text not null default 'gemini-3.6-flash',
   run_time_local time not null default '07:00', timezone text not null default 'Asia/Tokyo',
   max_races_per_strategy smallint not null default 3 check(max_races_per_strategy between 0 and 3),
-  daily_api_limit smallint not null default 30, parser_version text not null default 'jra-netkeiba-v1', updated_at timestamptz not null default now()
+  daily_api_limit smallint not null default 20 check(daily_api_limit between 1 and 20), parser_version text not null default 'jra-netkeiba-v1', updated_at timestamptz not null default now()
 );
 insert into public.app_settings(id) values(true);
 
@@ -144,6 +144,7 @@ grant usage on schema public to authenticated;
 grant select on all tables in schema public to authenticated;
 
 create index ai_calls_batch_run_id_idx on public.ai_calls(batch_run_id);
+create index ai_calls_requested_at_idx on public.ai_calls(requested_at);
 create index bets_prediction_id_idx on public.bets(prediction_id);
 create index bets_race_id_idx on public.bets(race_id);
 create index predictions_ai_call_id_idx on public.predictions(ai_call_id);
