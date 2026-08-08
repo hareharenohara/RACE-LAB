@@ -1,0 +1,16 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local tooling and dependencies
+node_modules/
+.supabase/
+.wrangler/
+
+# Logs and OS/editor files
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
