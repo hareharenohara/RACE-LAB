@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2.110.8";
 import * as cheerio from "npm:cheerio@1.0.0";
 import { optimizeEvaluationWeights } from "../_shared/weight-optimizer.ts";
+import { fitCalibration } from "../_shared/probability-calibrator.ts";
 
 type BetType =
   | "win"
@@ -276,6 +277,64 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("weight optimization failed", error);
   }
+  let calibrationUpdates = 0;
+  try {
+    const { data: history, error: historyError } = await db.from("bets").select(
+      "strategy,bet_type,raw_estimated_probability,estimated_probability,created_at,settlements(is_hit)",
+    ).order("created_at").limit(10000);
+    if (historyError) throw historyError;
+    const groups = new Map<string, any[]>();
+    for (const bet of history ?? []) {
+      const settlement = Array.isArray(bet.settlements)
+        ? bet.settlements[0]
+        : bet.settlements;
+      if (!settlement) continue;
+      const segment = `${bet.strategy}:${bet.bet_type}`,
+        observations = groups.get(segment) ?? [];
+      observations.push({
+        predicted: Number(
+          bet.raw_estimated_probability ?? bet.estimated_probability,
+        ),
+        outcome: Boolean(settlement.is_hit),
+        occurredAt: bet.created_at,
+      });
+      groups.set(segment, observations);
+    }
+    for (const [segment, observations] of groups) {
+      const fitted = fitCalibration(observations);
+      if (!fitted.adopted || !fitted.profile) continue;
+      const [strategy, betType] = segment.split(":"),
+        { data: existing } = await db.from("probability_calibration_profiles")
+          .select("sample_size").eq("strategy", strategy).eq(
+            "bet_type",
+            betType,
+          ).eq("is_active", true).maybeSingle();
+      if (Number(existing?.sample_size ?? 0) >= fitted.sampleSize) continue;
+      const { data: next, error: insertError } = await db.from(
+        "probability_calibration_profiles",
+      ).insert({
+        strategy,
+        bet_type: betType,
+        bins: fitted.profile,
+        sample_size: fitted.sampleSize,
+        baseline_brier: fitted.baselineBrier,
+        validation_brier: fitted.validationBrier,
+        improvement: fitted.improvement,
+        is_active: false,
+      }).select("id").single();
+      if (insertError) throw insertError;
+      await db.from("probability_calibration_profiles").update({
+        is_active: false,
+      }).eq("strategy", strategy).eq("bet_type", betType).eq("is_active", true);
+      const { error: activateError } = await db.from(
+        "probability_calibration_profiles",
+      ).update({ is_active: true }).eq("id", next.id);
+      if (activateError) throw activateError;
+      calibrationUpdates++;
+    }
+  } catch (error) {
+    console.error("probability calibration failed", error);
+  }
   return json({
     status: "ok",
     checked,
@@ -283,5 +342,6 @@ Deno.serve(async (req) => {
     settledBets,
     pending,
     weightUpdate,
+    calibrationUpdates,
   });
 });

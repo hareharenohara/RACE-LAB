@@ -90,6 +90,17 @@ create table public.bets (
   created_at timestamptz not null default now()
 );
 
+create table public.probability_calibration_profiles (
+  id uuid primary key default gen_random_uuid(), strategy public.strategy_type not null,
+  bet_type public.bet_type not null, bins jsonb not null, sample_size integer not null,
+  baseline_brier numeric(10,8) not null, validation_brier numeric(10,8) not null,
+  improvement numeric(10,8) not null, is_active boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create unique index probability_calibration_one_active_idx on public.probability_calibration_profiles(strategy,bet_type) where is_active;
+alter table public.bets add column raw_estimated_probability numeric(8,7), add column calibration_profile_id uuid references public.probability_calibration_profiles(id);
+create index bets_calibration_profile_id_idx on public.bets(calibration_profile_id);
+
 create table public.race_results (
   race_id uuid primary key references public.races(id), finish_order smallint[] not null,
   result_json jsonb not null, confirmed_at timestamptz not null, source_hash text not null
@@ -159,6 +170,7 @@ alter table public.bets enable row level security; alter table public.race_resul
 alter table public.payouts enable row level security; alter table public.settlements enable row level security;
 alter table public.strategy_accounts enable row level security; alter table public.app_settings enable row level security;
 alter table public.evaluation_weight_profiles enable row level security; alter table public.horse_evaluation_snapshots enable row level security;
+alter table public.probability_calibration_profiles enable row level security;
 
 create policy "profile owner" on public.profiles for select to authenticated using ((select auth.uid())=user_id);
 do $$ declare t text; begin
@@ -167,6 +179,7 @@ do $$ declare t text; begin
 end $$;
 create policy "owner read" on public.evaluation_weight_profiles for select to authenticated using (exists (select 1 from public.profiles p where p.user_id=(select auth.uid())));
 create policy "owner read" on public.horse_evaluation_snapshots for select to authenticated using (exists (select 1 from public.profiles p where p.user_id=(select auth.uid())));
+create policy "owner read" on public.probability_calibration_profiles for select to authenticated using (exists (select 1 from public.profiles p where p.user_id=(select auth.uid())));
 
 revoke all on all tables in schema public from anon;
 grant usage on schema public to authenticated;
