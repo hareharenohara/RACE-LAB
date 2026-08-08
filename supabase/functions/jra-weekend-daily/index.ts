@@ -181,6 +181,7 @@ Deno.serve(async (req) => {
         Awaited<ReturnType<JraProvider["getDetail"]>>
       >(),
       horseDbIds = new Map<string, string>();
+    let historyRequests = 0, historyRows = 0, historyErrors = 0;
     for (const id of chosen) {
       const row = (saved ?? []).find((r) => r.id === id)!,
         summary = races.find((r) => r.externalId === row.external_id)!;
@@ -218,6 +219,51 @@ Deno.serve(async (req) => {
           popularity: win?.popularity,
           raw_data: { provider: "netkeiba" },
         }, { onConflict: "race_id,horse_number" });
+      }
+      historyRequests++;
+      try {
+        const collected = await provider.getPastRuns(summary),
+          rows = await Promise.all(collected.flatMap((run) => {
+            const horseId = horseDbIds.get(run.externalHorseId);
+            if (!horseId) return [];
+            return [
+              h(run.rawData).then((sourceHash) => ({
+                horse_id: horseId,
+                race_date: run.raceDate,
+                track: run.track,
+                race_name: run.raceName,
+                surface: run.surface,
+                distance: run.distance,
+                condition: run.condition,
+                finish_position: run.finishPosition,
+                popularity: run.popularity,
+                finish_time: run.finishTime,
+                last3f: run.last3f,
+                margin: run.margin === undefined ? null : String(run.margin),
+                jockey: run.jockey,
+                weight_carried: run.weightCarried,
+                horse_weight: run.horseWeight,
+                runner_count: run.runnerCount,
+                source_hash: sourceHash,
+                raw_data: run.rawData,
+              })),
+            ];
+          }));
+        if (rows.length) {
+          const { error: historyError } = await db.from("past_runs").upsert(
+            rows,
+            { onConflict: "horse_id,race_date,track,race_name" },
+          );
+          if (historyError) throw historyError;
+          historyRows += rows.length;
+        }
+      } catch (historyError) {
+        historyErrors++;
+        console.error(
+          "PAST_RUN_COLLECTION_FAILED",
+          summary.externalId,
+          historyError,
+        );
       }
     }
     const dbHorseIds = [...new Set(horseDbIds.values())],
@@ -339,11 +385,14 @@ Deno.serve(async (req) => {
     await db.from("batch_runs").update({
       status: "succeeded",
       races_fetched: races.length,
-      api_requests: 2 + chosen.size * 2 + 4,
+      api_requests: 2 + chosen.size * 2 + historyRequests + 4,
       finished_at: new Date().toISOString(),
       metadata: {
         provider: "jra_netkeiba",
         details: chosen.size,
+        history_requests: historyRequests,
+        history_rows: historyRows,
+        history_errors: historyErrors,
         predictions: pc,
         bets: bc,
       },
@@ -352,6 +401,8 @@ Deno.serve(async (req) => {
       status: "succeeded",
       races: races.length,
       details: chosen.size,
+      historyRows,
+      historyErrors,
       predictions: pc,
       bets: bc,
       batchRunId: batch.id,
