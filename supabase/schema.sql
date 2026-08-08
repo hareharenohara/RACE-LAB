@@ -138,6 +138,8 @@ create table public.horse_evaluation_snapshots (
   evaluated_at timestamptz, primary key(race_id,horse_id)
 );
 create index horse_evaluation_snapshots_result_idx on public.horse_evaluation_snapshots(race_id,is_winner) where is_winner is not null;
+create index horse_evaluation_snapshots_horse_id_idx on public.horse_evaluation_snapshots(horse_id);
+create index horse_evaluation_snapshots_weight_profile_id_idx on public.horse_evaluation_snapshots(weight_profile_id);
 
 create table public.app_settings (
   id boolean primary key default true check(id), model text not null default 'gemini-3.6-flash',
