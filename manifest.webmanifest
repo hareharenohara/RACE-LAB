@@ -1,0 +1,19 @@
+{
+  "name": "RACE LAB — AI競馬予測監査",
+  "short_name": "RACE LAB",
+  "description": "AI競馬予測とプログラムの購入判断を検証するプライベート分析アプリ",
+  "lang": "ja",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f3ed",
+  "theme_color": "#12281f",
+  "categories": ["finance", "sports", "utilities"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
