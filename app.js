@@ -1,21 +1,387 @@
-const SUPABASE_URL='https://lgpvvwymvqzhoqkpuyjv.supabase.co';
-const SUPABASE_KEY='sb_publishable_OFguESiAuWQ8iHFzYgT-Mg_g-iL9-87';
-const labels={conservative:'保守型',balanced:'バランス型',aggressive:'積極型'};
-const betLabels={win:'単勝',place:'複勝',wide:'ワイド',quinella:'馬連',exacta:'馬単',trio:'3連複',trifecta:'3連単'};
-let session=JSON.parse(localStorage.getItem('race-lab-session')||'null'),accounts=[],predictions=[],batches=[],allBets=[],selections=[],activeStrategy='conservative';
-const yen=n=>`${n<0?'-':''}¥${Math.abs(Number(n||0)).toLocaleString()}`,pct=n=>`${Number(n||0).toFixed(1)}%`;
-const settlementOf=b=>Array.isArray(b.settlements)?b.settlements[0]:b.settlements;
-const jstDate=value=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo'}).format(new Date(value));
-async function auth(path,body){const r=await fetch(`${SUPABASE_URL}/auth/v1/${path}`,{method:'POST',headers:{apikey:SUPABASE_KEY,'content-type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.msg||data.error_description||data.message||'認証に失敗しました');return data}
-async function api(table,query=''){const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${session.access_token}`}});if(r.status===401){logout();throw new Error('ログイン期限が切れました')}const data=await r.json();if(!r.ok)throw new Error(data.message||'データ取得に失敗しました');return data}
-async function load(){try{[accounts,predictions,batches,allBets,selections]=await Promise.all([api('strategy_accounts','select=*&order=strategy'),api('predictions','select=id,strategy,action,confidence,reason,predicted_at,races(id,track,race_number,race_name,start_time,surface,distance,condition,status),bets(id,bet_type,combination,stake,odds_at_prediction,estimated_probability,expected_value,reason,stake_reason,settlements(return_amount,profit,is_hit))&order=predicted_at.desc&limit=100'),api('batch_runs','select=*&order=started_at.desc&limit=20'),api('bets','select=strategy,stake,settlements(return_amount,profit,is_hit)&limit=5000'),api('race_selections','select=race_id,strategy,reason,rank,created_at&order=created_at.desc&limit=500')]);render()}catch(e){showError(e.message)}}
-function render(){const total=accounts.reduce((n,a)=>n+Number(a.current_balance)-Number(a.initial_balance),0);document.querySelector('#total-profit').textContent=(total>=0?'+':'')+yen(total);document.querySelector('#strategy-cards').innerHTML=accounts.map(a=>{const profit=Number(a.current_balance)-Number(a.initial_balance),roi=a.total_staked?Number(a.total_returned)/Number(a.total_staked)*100:0;return `<article class="card strategy-link" data-open-strategy="${a.strategy}" role="button" tabindex="0"><div class="card-top"><span class="badge ${a.strategy}">${labels[a.strategy]}</span><small>予想・履歴を見る →</small></div><h3>現在残高</h3><strong>${yen(a.current_balance)}</strong><div class="stats"><div><small>累計損益</small><b class="${profit>=0?'positive':'negative'}">${profit>=0?'+':''}${yen(profit)}</b></div><div><small>回収率</small><b>${pct(roi)}</b></div><div><small>最低残高</small><b>${yen(a.minimum_balance)}</b></div></div></article>`}).join('');const max=Math.max(...accounts.map(a=>Math.abs(Number(a.current_balance))),1);document.querySelector('#balance-bars').innerHTML=accounts.map(a=>`<div class="balance-row"><span>${labels[a.strategy]}</span><i><b class="${a.strategy}" style="width:${Math.max(3,Math.abs(a.current_balance)/max*100)}%"></b></i><strong>${yen(a.current_balance)}</strong></div>`).join('');const latest=batches[0];document.querySelector('#last-run').textContent=latest?`最終実行 ${new Date(latest.started_at).toLocaleString('ja-JP')}`:'実行履歴なし';document.querySelector('#job-list').innerHTML=batches.slice(0,4).map(b=>`<div class="job"><i>${b.status==='succeeded'?'✓':'•'}</i><div><b>${b.target_date} / ${b.parser_version}</b><small>${b.races_fetched}レース・外部リクエスト ${b.api_requests}</small></div><time class="status ${b.status}">${b.status}</time></div>`).join('')||'<p class="empty">実行履歴はありません</p>';renderTabs();renderAnalytics();renderAudit()}
-function renderTabs(){const ids=['conservative','balanced','aggressive'];document.querySelector('#strategy-tabs').innerHTML=ids.map(id=>`<button class="${id===activeStrategy?'active':''}" data-strategy="${id}">${labels[id]}</button>`).join('');showRaces(activeStrategy)}
-function reasonText(value,fallback='理由は保存されていません'){return String(value||fallback)}
-function raceCard(p){const r=p.races,bets=p.bets||[],stake=bets.reduce((n,b)=>n+Number(b.stake),0),settled=bets.filter(b=>settlementOf(b)),returned=settled.reduce((n,b)=>n+Number(settlementOf(b).return_amount),0),isSettled=r.status==='finished'&&settled.length===bets.length,profit=returned-stake;const outcome=!isSettled?'pending':returned>0?'hit':'miss',outcomeLabel={pending:'結果待ち',hit:'的中',miss:'ハズレ'}[outcome],selection=selections.find(s=>s.race_id===r.id&&s.strategy===p.strategy);const betHtml=bets.map(b=>{const s=settlementOf(b),state=!s?'pending':s.is_hit?'hit':'miss',result=!s?'結果待ち':s.is_hit?`的中・払戻額 ${yen(s.return_amount)}`:'ハズレ',odds=Number(b.odds_at_prediction||0),ev=Number(b.expected_value||0);return `<div class="bet bet-${state}"><div class="bet-summary"><b>${betLabels[b.bet_type]} ${b.combination.join('-')}</b><span>${yen(b.stake)}</span><small>${result}</small><div class="bet-market"><span>予想時 ${odds.toFixed(1)}倍</span><span>EV ${ev.toFixed(2)}</span></div></div><details class="bet-reason"><summary aria-label="購入根拠を表示" title="購入根拠を表示"><span aria-hidden="true">⌄</span></summary><p><b>購入理由：</b>${reasonText(b.reason,p.reason)}</p><p><b>金額の根拠：</b>${reasonText(b.stake_reason,'既存予想のため個別の金額根拠は未保存です')}</p></details></div>`}).join('');const money=`<div class="result-money"><span>購入 <b>${yen(stake)}</b></span><span>払戻 <b>${isSettled?yen(returned):'---'}</b></span><span>収支 <b class="${isSettled?(profit>=0?'positive':'negative'):''}">${isSettled?(profit>=0?'+':'')+yen(profit):'---'}</b></span></div>`;return `<article class="race race-${outcome}"><div class="race-heading"><div><small>${new Date(r.start_time).toLocaleDateString('ja-JP')}・${r.surface==='turf'?'芝':'ダート'} ${r.distance||'---'}m・${new Date(r.start_time).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</small><div><strong>${r.track} ${r.race_number}R</strong><span>${r.race_name}</span></div></div><span class="outcome outcome-${outcome}">${outcomeLabel}</span></div><details class="race-reason"><summary>レース選定・予想の理由</summary><p><b>このレースを選んだ理由：</b>${reasonText(selection?.reason,p.reason)}</p><p><b>予想方針：</b>${reasonText(p.reason)}</p></details><div class="bets">${betHtml}</div><div class="race-result">${money}<small>信頼度 ${p.confidence}%</small></div></article>`}
-function showRaces(strategy){const list=predictions.filter(p=>p.strategy===strategy&&p.action==='bet'&&(p.bets||[]).length),today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo'}).format(new Date()),current=list.filter(p=>jstDate(p.races.start_time)===today),past=list.filter(p=>jstDate(p.races.start_time)!==today);const group=(title,items,empty)=>`<section class="race-group"><div class="race-group-title"><h2>${title}</h2><span>${items.length}レース</span></div>${items.length?items.map(raceCard).join(''):`<div class="empty panel">${empty}</div>`}</section>`;document.querySelector('#race-list').innerHTML=group('本日の予想',current,'本日の購入対象はまだありません')+group('過去の履歴',past,'過去の購入履歴はまだありません')}
-function statsFor(strategy){const bets=allBets.filter(b=>b.strategy===strategy),staked=bets.reduce((n,b)=>n+Number(b.stake),0),settled=bets.filter(b=>settlementOf(b)),returned=settled.reduce((n,b)=>n+Number(settlementOf(b).return_amount),0),hits=settled.filter(b=>settlementOf(b).is_hit).length;return{staked,returned,profit:returned-staked,roi:staked?returned/staked*100:0,hit:settled.length?hits/settled.length*100:0}}
-function renderAnalytics(){const s=accounts.map(a=>({...a,...statsFor(a.strategy)})),tot=s.reduce((x,a)=>({staked:x.staked+a.staked,returned:x.returned+a.returned}),{staked:0,returned:0});document.querySelector('#analysis-metrics').innerHTML=[['総予想',predictions.length],['総購入額',yen(tot.staked)],['総払戻額',yen(tot.returned)],['合算回収率',pct(tot.staked?tot.returned/tot.staked*100:0)]].map(x=>`<div class="metric"><small>${x[0]}</small><strong>${x[1]}</strong></div>`).join('');document.querySelector('#analysis-table').innerHTML=s.map(a=>`<tr><td><span class="badge ${a.strategy}">${labels[a.strategy]}</span></td><td>${yen(a.staked)}</td><td>${yen(a.returned)}</td><td class="${a.profit>=0?'positive':'negative'}">${yen(a.profit)}</td><td>${pct(a.roi)}</td><td>${pct(a.hit)}</td><td>${yen(a.minimum_balance)}</td></tr>`).join('')}
-function renderAudit(){document.querySelector('#audit-list').innerHTML=batches.map(b=>`<div class="audit-row"><b>${new Date(b.started_at).toLocaleString('ja-JP')}</b><span>${b.parser_version}<small>${b.races_fetched}レース / API ${b.api_requests}回${b.error_message?' / '+b.error_message:''}</small></span><em class="status ${b.status}">${b.status}</em></div>`).join('')||'<p class="empty">履歴はありません</p>'}
-function showError(message){const el=document.querySelector('#error');el.hidden=false;el.textContent=message}function logout(){localStorage.removeItem('race-lab-session');session=null;document.querySelector('#auth').classList.remove('hidden')}function openToday(strategy){activeStrategy=strategy;document.querySelectorAll('[data-page],.page').forEach(x=>x.classList.remove('active'));const nav=document.querySelector('[data-page="today"]');nav.classList.add('active');document.querySelector('#today').classList.add('active');document.querySelector('#page-title').textContent=`${labels[strategy]}の予想・履歴`;renderTabs();scrollTo({top:0,behavior:'smooth'})}
-document.querySelector('#auth-form').addEventListener('submit',async e=>{e.preventDefault();const m=document.querySelector('#auth-message'),emailValue=document.querySelector('#email').value,passwordValue=document.querySelector('#password').value;try{m.textContent='ログイン中…';session=await auth('token?grant_type=password',{email:emailValue,password:passwordValue});localStorage.setItem('race-lab-session',JSON.stringify(session));document.querySelector('#auth').classList.add('hidden');m.textContent='';load()}catch(err){m.textContent=err.message}});document.querySelector('#signup').addEventListener('click',async()=>{const m=document.querySelector('#auth-message'),emailValue=document.querySelector('#email').value,passwordValue=document.querySelector('#password').value;try{m.textContent='作成中…';const data=await auth('signup',{email:emailValue,password:passwordValue,data:{display_name:emailValue.split('@')[0]}});if(data.access_token){session=data;localStorage.setItem('race-lab-session',JSON.stringify(data));document.querySelector('#auth').classList.add('hidden');load()}else m.textContent='確認メールを送信しました。確認後にログインしてください。'}catch(err){m.textContent=err.message}});document.querySelector('#logout').onclick=logout;document.addEventListener('click',e=>{const card=e.target.closest('[data-open-strategy]');if(card){openToday(card.dataset.openStrategy);return}const nav=e.target.closest('[data-page]');if(nav){document.querySelectorAll('[data-page],.page').forEach(x=>x.classList.remove('active'));nav.classList.add('active');document.querySelector('#'+nav.dataset.page).classList.add('active');document.querySelector('#page-title').textContent=nav.textContent}const tab=e.target.closest('[data-strategy]');if(tab){activeStrategy=tab.dataset.strategy;document.querySelectorAll('[data-strategy]').forEach(x=>x.classList.remove('active'));tab.classList.add('active');showRaces(activeStrategy)}});document.addEventListener('keydown',e=>{const card=e.target.closest?.('[data-open-strategy]');if(card&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openToday(card.dataset.openStrategy)}});document.querySelector('#today-label').textContent=new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric',weekday:'long'});if(session?.access_token){document.querySelector('#auth').classList.add('hidden');load()}setInterval(()=>{if(session?.access_token)load()},60000);
+const SUPABASE_URL = "https://lgpvvwymvqzhoqkpuyjv.supabase.co";
+const SUPABASE_KEY = "sb_publishable_OFguESiAuWQ8iHFzYgT-Mg_g-iL9-87";
+const labels = {
+  conservative: "保守型",
+  balanced: "バランス型",
+  aggressive: "積極型",
+};
+const betLabels = {
+  win: "単勝",
+  place: "複勝",
+  wide: "ワイド",
+  quinella: "馬連",
+  exacta: "馬単",
+  trio: "3連複",
+  trifecta: "3連単",
+};
+let session = JSON.parse(localStorage.getItem("race-lab-session") || "null"),
+  accounts = [],
+  predictions = [],
+  batches = [],
+  allBets = [],
+  selections = [],
+  activeStrategy = "conservative";
+const yen = (n) =>
+    `${n < 0 ? "-" : ""}¥${Math.abs(Number(n || 0)).toLocaleString()}`,
+  pct = (n) => `${Number(n || 0).toFixed(1)}%`;
+const settlementOf = (b) =>
+  Array.isArray(b.settlements) ? b.settlements[0] : b.settlements;
+const jstDate = (value) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(
+    new Date(value),
+  );
+async function auth(path, body) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok) {
+    throw new Error(
+      data.msg || data.error_description || data.message ||
+        "認証に失敗しました",
+    );
+  }
+  return data;
+}
+async function api(table, query = "") {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+  if (r.status === 401) {
+    logout();
+    throw new Error("ログイン期限が切れました");
+  }
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.message || "データ取得に失敗しました");
+  return data;
+}
+async function load() {
+  try {
+    [accounts, predictions, batches, allBets, selections] = await Promise.all([
+      api("strategy_accounts", "select=*&order=strategy"),
+      api(
+        "predictions",
+        "select=id,strategy,action,confidence,reason,predicted_at,races(id,track,race_number,race_name,start_time,surface,distance,condition,status),bets(id,bet_type,combination,stake,odds_at_prediction,estimated_probability,expected_value,reason,stake_reason,settlements(return_amount,profit,is_hit))&order=predicted_at.desc&limit=100",
+      ),
+      api("batch_runs", "select=*&order=started_at.desc&limit=20"),
+      api(
+        "bets",
+        "select=strategy,stake,estimated_probability,settlements(return_amount,profit,is_hit)&limit=5000",
+      ),
+      api(
+        "race_selections",
+        "select=race_id,strategy,reason,rank,created_at&order=created_at.desc&limit=500",
+      ),
+    ]);
+    render();
+  } catch (e) {
+    showError(e.message);
+  }
+}
+function render() {
+  const total = accounts.reduce(
+    (n, a) => n + Number(a.current_balance) - Number(a.initial_balance),
+    0,
+  );
+  document.querySelector("#total-profit").textContent =
+    (total >= 0 ? "+" : "") + yen(total);
+  document.querySelector("#strategy-cards").innerHTML = accounts.map((a) => {
+    const profit = Number(a.current_balance) - Number(a.initial_balance),
+      roi = a.total_staked
+        ? Number(a.total_returned) / Number(a.total_staked) * 100
+        : 0;
+    return `<article class="card strategy-link" data-open-strategy="${a.strategy}" role="button" tabindex="0"><div class="card-top"><span class="badge ${a.strategy}">${
+      labels[a.strategy]
+    }</span><small>予想・履歴を見る →</small></div><h3>現在残高</h3><strong>${
+      yen(a.current_balance)
+    }</strong><div class="stats"><div><small>累計損益</small><b class="${
+      profit >= 0 ? "positive" : "negative"
+    }">${profit >= 0 ? "+" : ""}${
+      yen(profit)
+    }</b></div><div><small>回収率</small><b>${
+      pct(roi)
+    }</b></div><div><small>最低残高</small><b>${
+      yen(a.minimum_balance)
+    }</b></div></div></article>`;
+  }).join("");
+  const max = Math.max(
+    ...accounts.map((a) => Math.abs(Number(a.current_balance))),
+    1,
+  );
+  document.querySelector("#balance-bars").innerHTML = accounts.map((a) =>
+    `<div class="balance-row"><span>${
+      labels[a.strategy]
+    }</span><i><b class="${a.strategy}" style="width:${
+      Math.max(3, Math.abs(a.current_balance) / max * 100)
+    }%"></b></i><strong>${yen(a.current_balance)}</strong></div>`
+  ).join("");
+  const latest = batches[0];
+  document.querySelector("#last-run").textContent = latest
+    ? `最終実行 ${new Date(latest.started_at).toLocaleString("ja-JP")}`
+    : "実行履歴なし";
+  document.querySelector("#job-list").innerHTML =
+    batches.slice(0, 4).map((b) =>
+      `<div class="job"><i>${
+        b.status === "succeeded" ? "✓" : "•"
+      }</i><div><b>${b.target_date} / ${b.parser_version}</b><small>${b.races_fetched}レース・外部リクエスト ${b.api_requests}</small></div><time class="status ${b.status}">${b.status}</time></div>`
+    ).join("") || '<p class="empty">実行履歴はありません</p>';
+  renderTabs();
+  renderAnalytics();
+  renderAudit();
+}
+function renderTabs() {
+  const ids = ["conservative", "balanced", "aggressive"];
+  document.querySelector("#strategy-tabs").innerHTML = ids.map((id) =>
+    `<button class="${
+      id === activeStrategy ? "active" : ""
+    }" data-strategy="${id}">${labels[id]}</button>`
+  ).join("");
+  showRaces(activeStrategy);
+}
+function reasonText(value, fallback = "理由は保存されていません") {
+  return String(value || fallback);
+}
+function raceCard(p) {
+  const r = p.races,
+    bets = p.bets || [],
+    stake = bets.reduce((n, b) => n + Number(b.stake), 0),
+    settled = bets.filter((b) => settlementOf(b)),
+    returned = settled.reduce(
+      (n, b) => n + Number(settlementOf(b).return_amount),
+      0,
+    ),
+    isSettled = r.status === "finished" && settled.length === bets.length,
+    profit = returned - stake;
+  const outcome = !isSettled ? "pending" : returned > 0 ? "hit" : "miss",
+    outcomeLabel =
+      { pending: "結果待ち", hit: "的中", miss: "ハズレ" }[outcome],
+    selection = selections.find((s) =>
+      s.race_id === r.id && s.strategy === p.strategy
+    );
+  const betHtml = bets.map((b) => {
+    const s = settlementOf(b),
+      state = !s ? "pending" : s.is_hit ? "hit" : "miss",
+      result = !s
+        ? "結果待ち"
+        : s.is_hit
+        ? `的中・払戻額 ${yen(s.return_amount)}`
+        : "ハズレ",
+      odds = Number(b.odds_at_prediction || 0),
+      ev = Number(b.expected_value || 0);
+    return `<div class="bet bet-${state}"><div class="bet-summary"><b>${
+      betLabels[b.bet_type]
+    } ${b.combination.join("-")}</b><span>${
+      yen(b.stake)
+    }</span><small>${result}</small><div class="bet-market"><span>予想時 ${
+      odds.toFixed(1)
+    }倍</span><span>EV ${
+      ev.toFixed(2)
+    }</span></div></div><details class="bet-reason"><summary aria-label="購入根拠を表示" title="購入根拠を表示"><span aria-hidden="true">⌄</span></summary><p><b>購入理由：</b>${
+      reasonText(b.reason, p.reason)
+    }</p><p><b>金額の根拠：</b>${
+      reasonText(b.stake_reason, "既存予想のため個別の金額根拠は未保存です")
+    }</p></details></div>`;
+  }).join("");
+  const money = `<div class="result-money"><span>購入 <b>${
+    yen(stake)
+  }</b></span><span>払戻 <b>${
+    isSettled ? yen(returned) : "---"
+  }</b></span><span>収支 <b class="${
+    isSettled ? (profit >= 0 ? "positive" : "negative") : ""
+  }">${
+    isSettled ? (profit >= 0 ? "+" : "") + yen(profit) : "---"
+  }</b></span></div>`;
+  return `<article class="race race-${outcome}"><div class="race-heading"><div><small>${
+    new Date(r.start_time).toLocaleDateString("ja-JP")
+  }・${r.surface === "turf" ? "芝" : "ダート"} ${r.distance || "---"}m・${
+    new Date(r.start_time).toLocaleTimeString("ja-JP", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }</small><div><strong>${r.track} ${r.race_number}R</strong><span>${r.race_name}</span></div></div><span class="outcome outcome-${outcome}">${outcomeLabel}</span></div><details class="race-reason"><summary>レース選定・予想の理由</summary><p><b>このレースを選んだ理由：</b>${
+    reasonText(selection?.reason, p.reason)
+  }</p><p><b>予想方針：</b>${
+    reasonText(p.reason)
+  }</p></details><div class="bets">${betHtml}</div><div class="race-result">${money}<small>信頼度 ${p.confidence}%</small></div></article>`;
+}
+function showRaces(strategy) {
+  const list = predictions.filter((p) =>
+      p.strategy === strategy && p.action === "bet" && (p.bets || []).length
+    ),
+    today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(
+      new Date(),
+    ),
+    current = list.filter((p) => jstDate(p.races.start_time) === today),
+    past = list.filter((p) => jstDate(p.races.start_time) !== today);
+  const group = (title, items, empty) =>
+    `<section class="race-group"><div class="race-group-title"><h2>${title}</h2><span>${items.length}レース</span></div>${
+      items.length
+        ? items.map(raceCard).join("")
+        : `<div class="empty panel">${empty}</div>`
+    }</section>`;
+  document.querySelector("#race-list").innerHTML =
+    group("本日の予想", current, "本日の購入対象はまだありません") +
+    group("過去の履歴", past, "過去の購入履歴はまだありません");
+}
+function statsFor(strategy) {
+  return RaceAnalytics.strategyStats(allBets, strategy);
+}
+function renderAnalytics() {
+  const s = accounts.map((a) => ({ ...a, ...statsFor(a.strategy) })),
+    tot = RaceAnalytics.validationStats(allBets),
+    money = s.reduce(
+      (x, a) => ({
+        staked: x.staked + a.staked,
+        returned: x.returned + a.returned,
+      }),
+      { staked: 0, returned: 0 },
+    );
+  document.querySelector("#analysis-metrics").innerHTML = [
+    ["検証済み馬券", tot.count],
+    ["合算回収率", pct(money.staked ? money.returned / money.staked * 100 : 0)],
+    ["確率誤差", pct(tot.calibrationGap * 100)],
+    ["Brierスコア", tot.brierScore.toFixed(3)],
+  ].map((x) =>
+    `<div class="metric"><small>${x[0]}</small><strong>${x[1]}</strong></div>`
+  ).join("");
+  document.querySelector("#analysis-table").innerHTML = s.map((a) =>
+    `<tr><td><span class="badge ${a.strategy}">${
+      labels[a.strategy]
+    }</span></td><td>${yen(a.staked)}</td><td>${
+      yen(a.returned)
+    }</td><td class="${a.profit >= 0 ? "positive" : "negative"}">${
+      yen(a.profit)
+    }</td><td>${pct(a.roi)}</td><td>${pct(a.predictedRate * 100)}</td><td>${
+      pct(a.observedRate * 100)
+    }</td><td>${pct(a.calibrationGap * 100)}</td><td>${
+      a.brierScore.toFixed(3)
+    }</td><td>${yen(a.minimum_balance)}</td></tr>`
+  ).join("");
+}
+function renderAudit() {
+  document.querySelector("#audit-list").innerHTML =
+    batches.map((b) =>
+      `<div class="audit-row"><b>${
+        new Date(b.started_at).toLocaleString("ja-JP")
+      }</b><span>${b.parser_version}<small>${b.races_fetched}レース / API ${b.api_requests}回${
+        b.error_message ? " / " + b.error_message : ""
+      }</small></span><em class="status ${b.status}">${b.status}</em></div>`
+    ).join("") || '<p class="empty">履歴はありません</p>';
+}
+function showError(message) {
+  const el = document.querySelector("#error");
+  el.hidden = false;
+  el.textContent = message;
+}
+function logout() {
+  localStorage.removeItem("race-lab-session");
+  session = null;
+  document.querySelector("#auth").classList.remove("hidden");
+}
+function openToday(strategy) {
+  activeStrategy = strategy;
+  document.querySelectorAll("[data-page],.page").forEach((x) =>
+    x.classList.remove("active")
+  );
+  const nav = document.querySelector('[data-page="today"]');
+  nav.classList.add("active");
+  document.querySelector("#today").classList.add("active");
+  document.querySelector("#page-title").textContent = `${
+    labels[strategy]
+  }の予想・履歴`;
+  renderTabs();
+  scrollTo({ top: 0, behavior: "smooth" });
+}
+document.querySelector("#auth-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const m = document.querySelector("#auth-message"),
+    emailValue = document.querySelector("#email").value,
+    passwordValue = document.querySelector("#password").value;
+  try {
+    m.textContent = "ログイン中…";
+    session = await auth("token?grant_type=password", {
+      email: emailValue,
+      password: passwordValue,
+    });
+    localStorage.setItem("race-lab-session", JSON.stringify(session));
+    document.querySelector("#auth").classList.add("hidden");
+    m.textContent = "";
+    load();
+  } catch (err) {
+    m.textContent = err.message;
+  }
+});
+document.querySelector("#signup").addEventListener("click", async () => {
+  const m = document.querySelector("#auth-message"),
+    emailValue = document.querySelector("#email").value,
+    passwordValue = document.querySelector("#password").value;
+  try {
+    m.textContent = "作成中…";
+    const data = await auth("signup", {
+      email: emailValue,
+      password: passwordValue,
+      data: { display_name: emailValue.split("@")[0] },
+    });
+    if (data.access_token) {
+      session = data;
+      localStorage.setItem("race-lab-session", JSON.stringify(data));
+      document.querySelector("#auth").classList.add("hidden");
+      load();
+    } else {m.textContent =
+        "確認メールを送信しました。確認後にログインしてください。";}
+  } catch (err) {
+    m.textContent = err.message;
+  }
+});
+document.querySelector("#logout").onclick = logout;
+document.addEventListener("click", (e) => {
+  const card = e.target.closest("[data-open-strategy]");
+  if (card) {
+    openToday(card.dataset.openStrategy);
+    return;
+  }
+  const nav = e.target.closest("[data-page]");
+  if (nav) {
+    document.querySelectorAll("[data-page],.page").forEach((x) =>
+      x.classList.remove("active")
+    );
+    nav.classList.add("active");
+    document.querySelector("#" + nav.dataset.page).classList.add("active");
+    document.querySelector("#page-title").textContent = nav.textContent;
+  }
+  const tab = e.target.closest("[data-strategy]");
+  if (tab) {
+    activeStrategy = tab.dataset.strategy;
+    document.querySelectorAll("[data-strategy]").forEach((x) =>
+      x.classList.remove("active")
+    );
+    tab.classList.add("active");
+    showRaces(activeStrategy);
+  }
+});
+document.addEventListener("keydown", (e) => {
+  const card = e.target.closest?.("[data-open-strategy]");
+  if (card && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    openToday(card.dataset.openStrategy);
+  }
+});
+document.querySelector("#today-label").textContent = new Date()
+  .toLocaleDateString("ja-JP", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "long",
+  });
+if (session?.access_token) {
+  document.querySelector("#auth").classList.add("hidden");
+  load();
+}
+setInterval(() => {
+  if (session?.access_token) load();
+}, 60000);
