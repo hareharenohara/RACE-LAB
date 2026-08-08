@@ -3,8 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#12281f">
+  <meta name="application-name" content="RACE LAB">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="RACE LAB">
   <title>RACE LAB — AI予測監査</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./ui.css">
 </head>
 <body>
   <div id="auth" class="auth-layer">
@@ -29,7 +38,8 @@
     <div class="sidebar-foot"><i></i> 自動運用中<small>予想 毎日07:00・結果 10分間隔</small><button id="logout">ログアウト</button></div>
   </aside>
   <main>
-    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">概要</h1></div><div class="header-meta"><span>AI + RULE ENGINE</span><b id="last-run">データ読込中</b></div></header>
+    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">概要</h1></div><div class="header-actions"><button id="pwa-install" class="install-button" hidden>アプリをインストール</button><div class="header-meta"><span>AI + RULE ENGINE</span><b id="last-run">データ読込中</b></div></div></header>
+    <div id="pwa-update" class="update-toast" hidden><span>新しいバージョンを利用できます</span><button>今すぐ更新</button></div>
     <div id="error" class="error" hidden></div>
     <section id="dashboard" class="page active">
       <div class="hero"><div><p>3戦略 合計損益</p><strong id="total-profit">—</strong><small>開始資金 合計 ¥300,000</small></div><div class="flow-mini"><span>DATA</span><b>→</b><span>AI</span><b>→</b><span>RULES</span><b>→</b><span>BET / SKIP</span></div></div>
