@@ -11,6 +11,21 @@ export interface HorseEvaluation {
   estimatedWinProbability: number;
   dataQuality: number;
   sampleSize: number;
+  features: HorseFeatures;
+}
+
+export interface HorseFeatures {
+  recentForm: number;
+  formTrend: number;
+  surfaceFit: number;
+  distanceFit: number;
+  courseFit: number;
+  goingFit: number;
+  closingPerformance: number;
+  marginPerformance: number;
+  jockeyPartnership: number;
+  weightCarriedChange: number | null;
+  layoffDays: number | null;
 }
 
 interface EvaluationInput {
@@ -42,55 +57,100 @@ function finishScore(run: PastRun) {
   return clamp(100 * (field - run.finishPosition) / (field - 1));
 }
 
-function abilityScore(runs: PastRun[]) {
+const scoredMean = (runs: PastRun[], fallback = 50) =>
+  mean(runs.map(finishScore), fallback);
+
+function layoffDays(runs: PastRun[], raceDate: string) {
+  const lastDate = runs[0]?.raceDate ? new Date(runs[0].raceDate) : null;
+  return lastDate
+    ? Math.max(
+      0,
+      Math.round(
+        (new Date(raceDate).getTime() - lastDate.getTime()) / 86400000,
+      ),
+    )
+    : null;
+}
+
+export function buildHorseFeatures(
+  entry: Entry,
+  race: RaceSummary,
+  runs: PastRun[],
+): HorseFeatures {
+  const distanceRuns = race.distance == null
+      ? []
+      : runs.filter((run) =>
+        run.distance != null && Math.abs(run.distance - race.distance!) <= 200
+      ),
+    surfaceRuns = race.surface == null
+      ? []
+      : runs.filter((run) => run.surface === race.surface),
+    courseRuns = runs.filter((run) => run.track === race.track),
+    goingRuns = race.condition == null
+      ? []
+      : runs.filter((run) => run.condition === race.condition),
+    recent = scoredMean(runs.slice(0, 2)),
+    older = scoredMean(runs.slice(2, 5), recent),
+    closing = runs.filter((run) => run.last3f != null).map((run) => {
+      const distanceAdjustment = ((run.distance ?? 1600) - 1600) / 400 * 0.35,
+        baseline = run.surface === "dirt" ? 37 : 35;
+      return clamp(50 + (baseline + distanceAdjustment - run.last3f!) * 12);
+    }),
+    margins = runs.filter((run) =>
+      run.margin != null && run.finishPosition != null
+    ).map((run) =>
+      clamp(
+        50 + (run.finishPosition === 1 ? run.margin! : -run.margin!) * 15,
+      )
+    ),
+    jockeyRuns = entry.jockey
+      ? runs.filter((run) => run.jockey === entry.jockey)
+      : [],
+    latestWeight = runs.find((run) => run.weightCarried != null)?.weightCarried;
+  return {
+    recentForm: round(weightedMean(runs.map(finishScore))),
+    formTrend: round(clamp(50 + (recent - older) * 0.75)),
+    surfaceFit: round(scoredMean(surfaceRuns)),
+    distanceFit: round(scoredMean(distanceRuns)),
+    courseFit: round(scoredMean(courseRuns)),
+    goingFit: round(scoredMean(goingRuns)),
+    closingPerformance: round(mean(closing)),
+    marginPerformance: round(mean(margins)),
+    jockeyPartnership: round(scoredMean(jockeyRuns)),
+    weightCarriedChange: entry.weightCarried != null && latestWeight != null
+      ? round(entry.weightCarried - latestWeight)
+      : null,
+    layoffDays: layoffDays(runs, race.raceDate),
+  };
+}
+
+function abilityScore(runs: PastRun[], features: HorseFeatures) {
   if (!runs.length) return 50;
   const finishes = runs.map(finishScore);
-  const recent = weightedMean(finishes);
   const average = mean(finishes);
   const variance = mean(finishes.map((score) => (score - average) ** 2), 0);
   const stability = clamp(100 - Math.sqrt(variance) * 2);
-  const closing = mean(
-    runs.filter((run) => run.last3f != null).map((run) =>
-      clamp(150 - Number(run.last3f) * 2.5)
-    ),
-  );
-  return clamp(recent * 0.7 + stability * 0.15 + closing * 0.15);
-}
-
-function suitabilityScore(race: RaceSummary, runs: PastRun[]) {
-  if (!runs.length) return 50;
-  const distanceRuns = race.distance == null
-    ? []
-    : runs.filter((run) =>
-      run.distance != null && Math.abs(run.distance - race.distance!) <= 200
-    );
-  const surfaceRuns = race.surface == null
-    ? []
-    : runs.filter((run) => run.surface === race.surface);
-  const courseRuns = runs.filter((run) => run.track === race.track);
-  const conditionRuns = race.condition == null
-    ? []
-    : runs.filter((run) => run.condition === race.condition);
   return clamp(
-    mean(distanceRuns.map(finishScore)) * 0.35 +
-      mean(surfaceRuns.map(finishScore)) * 0.3 +
-      mean(courseRuns.map(finishScore)) * 0.2 +
-      mean(conditionRuns.map(finishScore)) * 0.15,
+    features.recentForm * 0.55 + stability * 0.15 +
+      features.closingPerformance * 0.15 +
+      features.marginPerformance * 0.15,
   );
 }
 
-function conditionScore(entry: Entry, runs: PastRun[], raceDate: string) {
+function suitabilityScore(features: HorseFeatures) {
+  return clamp(
+    features.distanceFit * 0.35 + features.surfaceFit * 0.3 +
+      features.courseFit * 0.2 + features.goingFit * 0.15,
+  );
+}
+
+function conditionScore(
+  entry: Entry,
+  runs: PastRun[],
+  features: HorseFeatures,
+) {
   if (!runs.length) return 50;
-  const recent = mean(runs.slice(0, 2).map(finishScore));
-  const older = mean(runs.slice(2, 5).map(finishScore), recent);
-  const trend = clamp(50 + (recent - older) * 0.75);
-  const lastDate = runs[0]?.raceDate ? new Date(runs[0].raceDate) : null;
-  const daysSince = lastDate
-    ? Math.max(
-      0,
-      (new Date(raceDate).getTime() - lastDate.getTime()) / 86400000,
-    )
-    : null;
+  const daysSince = features.layoffDays;
   const layoff = daysSince == null
     ? 50
     : daysSince <= 14
@@ -107,12 +167,16 @@ function conditionScore(entry: Entry, runs: PastRun[], raceDate: string) {
     ? entry.jockey === runs[0].jockey ? 70 : 50
     : 50;
   return clamp(
-    trend * 0.4 + layoff * 0.25 + weightChange * 0.2 +
+    features.formTrend * 0.4 + layoff * 0.25 + weightChange * 0.2 +
       jockeyContinuity * 0.15,
   );
 }
 
-function raceContextScore(entry: Entry, entries: Entry[]) {
+function raceContextScore(
+  entry: Entry,
+  entries: Entry[],
+  features: HorseFeatures,
+) {
   const gate = entry.gateNumber && entries.length > 1
     ? 100 - ((entry.gateNumber - 1) / (entries.length - 1)) * 35
     : 50;
@@ -122,7 +186,7 @@ function raceContextScore(entry: Entry, entries: Entry[]) {
   const weight = entry.weightCarried != null && carried.length
     ? clamp(50 + (mean(carried) - entry.weightCarried) * 8)
     : 50;
-  return clamp(gate * 0.6 + weight * 0.4);
+  return clamp(gate * 0.4 + weight * 0.4 + features.jockeyPartnership * 0.2);
 }
 
 function dataQuality(entry: Entry, race: RaceSummary, runs: PastRun[]) {
@@ -167,10 +231,11 @@ export function evaluateRace(
       0,
       5,
     );
-    const ability = abilityScore(runs);
-    const suitability = suitabilityScore(race, runs);
-    const condition = conditionScore(entry, runs, race.raceDate);
-    const context = raceContextScore(entry, entries);
+    const features = buildHorseFeatures(entry, race, runs);
+    const ability = abilityScore(runs, features);
+    const suitability = suitabilityScore(features);
+    const condition = conditionScore(entry, runs, features);
+    const context = raceContextScore(entry, entries, features);
     const overall = ability * 0.4 + suitability * 0.3 + condition * 0.2 +
       context * 0.1;
     return {
@@ -183,6 +248,7 @@ export function evaluateRace(
       overallScore: round(overall),
       dataQuality: round(dataQuality(entry, race, runs), 2),
       sampleSize: runs.length,
+      features,
     };
   });
   if (!base.length) return [];

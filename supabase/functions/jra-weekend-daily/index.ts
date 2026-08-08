@@ -269,7 +269,7 @@ Deno.serve(async (req) => {
     const dbHorseIds = [...new Set(horseDbIds.values())],
       { data: pastRows, error: pastError } = dbHorseIds.length
         ? await db.from("past_runs").select(
-          "horse_id,race_date,track,race_name,surface,distance,condition,finish_position,popularity,odds,finish_time,last3f,jockey,weight_carried,horse_weight,runner_count",
+          "horse_id,race_date,track,race_name,surface,distance,condition,finish_position,popularity,odds,finish_time,last3f,margin,jockey,weight_carried,horse_weight,runner_count",
         ).in("horse_id", dbHorseIds).order("race_date", { ascending: false })
           .limit(
             1000,
@@ -297,6 +297,7 @@ Deno.serve(async (req) => {
         odds: row.odds,
         finishTime: row.finish_time,
         last3f: row.last3f,
+        margin: row.margin == null ? undefined : Number(row.margin),
         jockey: row.jockey,
         weightCarried: row.weight_carried,
         horseWeight: row.horse_weight,
