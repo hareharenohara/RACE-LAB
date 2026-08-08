@@ -441,8 +441,6 @@ Deno.serve(async (req) => {
         let raceStake = 0;
         for (const b of p.bets as any[]) {
           const odds = market.get(`${p.race_id}:${ok(b.type, b.horses)}`);
-          if (!odds) throw new Error("ODDS_NOT_FOUND");
-          if (!policy.allowedBetTypes.includes(b.type)) continue;
           const evaluations = evaluationsByRace.get(String(p.race_id)) ?? [],
             quality = Math.min(
               ...b.horses.map((horse: number) =>
@@ -450,41 +448,90 @@ Deno.serve(async (req) => {
                   0
               ),
             );
-          if (quality < policy.minimumDataQuality) continue;
           const calibration = calibrations.get(`${s}:${b.type}`),
             rawProbability = Number(b.estimated_probability),
             estimatedProbability = calibrateProbability(
               calibration?.bins as CalibrationProfile | undefined,
               rawProbability,
             ),
-            expectedValue = odds * estimatedProbability;
-          if (expectedValue < policy.minimumExpectedValue) continue;
-          const stake = Math.floor(
-            Math.min(
-              Number(b.stake),
-              policy.maxStakePerRace - raceStake,
-              policy.maxStakePerDay - dayStake,
-            ) / 100,
-          ) * 100;
-          if (stake < 100) continue;
-          await db.from("bets").insert({
+            expectedValue = odds ? odds * estimatedProbability : null;
+          let decision = "rejected",
+            reasonCode = "ODDS_NOT_FOUND",
+            reasonDetail = "市場オッズが見つからないため見送り",
+            stake = 0;
+          if (odds && !policy.allowedBetTypes.includes(b.type)) {
+            reasonCode = "BET_TYPE_NOT_ALLOWED";
+            reasonDetail = "この戦略で許可されていない券種のため見送り";
+          } else if (odds && quality < policy.minimumDataQuality) {
+            reasonCode = "DATA_QUALITY_LOW";
+            reasonDetail = `データ品質 ${quality.toFixed(2)} が基準 ${policy.minimumDataQuality.toFixed(2)} 未満`;
+          } else if (odds && Number(expectedValue) < policy.minimumExpectedValue) {
+            reasonCode = "EXPECTED_VALUE_LOW";
+            reasonDetail = `期待値 ${Number(expectedValue).toFixed(2)} が基準 ${policy.minimumExpectedValue.toFixed(2)} 未満`;
+          } else if (odds) {
+            stake = Math.floor(
+              Math.min(
+                Number(b.stake),
+                policy.maxStakePerRace - raceStake,
+                policy.maxStakePerDay - dayStake,
+              ) / 100,
+            ) * 100;
+            if (stake < 100) {
+              reasonCode = "STAKE_LIMIT_REACHED";
+              reasonDetail = "レースまたは1日の購入上限に達したため見送り";
+            } else {
+              decision = stake < Number(b.stake) ? "reduced" : "purchased";
+              reasonCode = decision === "reduced" ? "STAKE_REDUCED" : "PURCHASED";
+              reasonDetail = decision === "reduced"
+                ? `上限に合わせて ${Number(b.stake)}円から${stake}円へ減額して購入`
+                : "すべての基準を通過したため購入";
+            }
+          }
+          let betId: string | null = null;
+          if (decision !== "rejected") {
+            const { data: savedBet, error: betError } = await db.from("bets").insert({
+              prediction_id: pred.id,
+              race_id: p.race_id,
+              strategy: s,
+              bet_type: b.type,
+              combination: b.horses,
+              stake,
+              odds_at_prediction: odds,
+              raw_estimated_probability: rawProbability,
+              estimated_probability: estimatedProbability,
+              calibration_profile_id: calibration?.id,
+              expected_value: expectedValue,
+              reason: b.reason,
+              stake_reason: b.stake_reason,
+            }).select("id").single();
+            if (betError) throw betError;
+            betId = savedBet.id;
+            raceStake += stake;
+            dayStake += stake;
+            bc++;
+          }
+          const { error: decisionError } = await db.from("bet_decisions").insert({
             prediction_id: pred.id,
+            bet_id: betId,
             race_id: p.race_id,
             strategy: s,
             bet_type: b.type,
             combination: b.horses,
-            stake,
-            odds_at_prediction: odds,
-            raw_estimated_probability: rawProbability,
-            estimated_probability: estimatedProbability,
-            calibration_profile_id: calibration?.id,
+            proposed_stake: Number(b.stake),
+            final_stake: stake,
+            odds,
+            raw_probability: rawProbability,
+            calibrated_probability: estimatedProbability,
             expected_value: expectedValue,
-            reason: b.reason,
-            stake_reason: b.stake_reason,
+            minimum_expected_value: policy.minimumExpectedValue,
+            data_quality: Number.isFinite(quality) ? quality : 0,
+            minimum_data_quality: policy.minimumDataQuality,
+            decision,
+            reason_code: reasonCode,
+            reason_detail: reasonDetail,
+            calibration_profile_id: calibration?.id,
           });
-          raceStake += stake;
-          dayStake += stake;
-          bc++;
+          if (decisionError) throw decisionError;
         }
       }
     }
