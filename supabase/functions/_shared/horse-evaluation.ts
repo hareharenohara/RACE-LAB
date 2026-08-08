@@ -28,6 +28,20 @@ export interface HorseFeatures {
   layoffDays: number | null;
 }
 
+export interface EvaluationWeights {
+  ability: number;
+  suitability: number;
+  condition: number;
+  raceContext: number;
+}
+
+export const DEFAULT_EVALUATION_WEIGHTS: EvaluationWeights = {
+  ability: 0.4,
+  suitability: 0.3,
+  condition: 0.2,
+  raceContext: 0.1,
+};
+
 interface EvaluationInput {
   entry: Entry;
   race: RaceSummary;
@@ -225,6 +239,7 @@ export function evaluateRace(
   race: RaceSummary,
   entries: Entry[],
   pastRunsByHorse: Map<string, PastRun[]>,
+  weights = DEFAULT_EVALUATION_WEIGHTS,
 ): HorseEvaluation[] {
   const base = entries.map((entry) => {
     const runs = (pastRunsByHorse.get(entry.umaxScores.horse_id) ?? []).slice(
@@ -236,8 +251,9 @@ export function evaluateRace(
     const suitability = suitabilityScore(features);
     const condition = conditionScore(entry, runs, features);
     const context = raceContextScore(entry, entries, features);
-    const overall = ability * 0.4 + suitability * 0.3 + condition * 0.2 +
-      context * 0.1;
+    const overall = ability * weights.ability +
+      suitability * weights.suitability + condition * weights.condition +
+      context * weights.raceContext;
     return {
       horseNumber: entry.horseNumber,
       horseName: entry.horseName,
