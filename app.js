@@ -31,12 +31,13 @@ function showRaces(strategy){
   const list=predictions.filter(p=>p.strategy===strategy);
   document.querySelector('#race-list').innerHTML=list.map(p=>{
     const r=p.races,bets=p.bets||[],stake=bets.reduce((n,b)=>n+Number(b.stake),0);
-    const settled=bets.filter(b=>b.settlements?.length),returned=settled.reduce((n,b)=>n+Number(b.settlements[0].return_amount),0);
+    const settlementOf=b=>Array.isArray(b.settlements)?b.settlements[0]:b.settlements;
+    const settled=bets.filter(b=>settlementOf(b)),returned=settled.reduce((n,b)=>n+Number(settlementOf(b).return_amount),0);
     const isSettled=r.status==='finished'&&(p.action==='skip'||settled.length===bets.length),profit=returned-stake;
     const outcome=p.action==='skip'?'skip':!isSettled?'pending':returned>0?'hit':'miss';
     const outcomeLabel={skip:'見送り',pending:'結果待ち',hit:'的中',miss:'ハズレ'}[outcome];
     const betHtml=p.action==='skip'?'<span class="bet skip">見送り</span>':bets.map(b=>{
-      const s=b.settlements?.[0],state=!s?'pending':s.is_hit?'hit':'miss';
+      const s=settlementOf(b),state=!s?'pending':s.is_hit?'hit':'miss';
       const result=!s?'結果待ち':s.is_hit?`的中・払戻 ${yen(s.return_amount)}`:'ハズレ';
       return `<span class="bet bet-${state}">${betLabels[b.bet_type]} ${b.combination.join('-')}・投資 ${yen(b.stake)}<small>${result}</small></span>`;
     }).join('');
@@ -46,7 +47,7 @@ function showRaces(strategy){
     return `<article class="race race-${outcome}"><div class="race-id"><small>${new Date(p.predicted_at).toLocaleDateString('ja-JP')}</small><strong>${r.track} ${r.race_number}R</strong><small>${r.surface==='turf'?'芝':'ダート'} ${r.distance||'---'}m・${new Date(r.start_time).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</small></div><div class="race-main"><div class="outcome-line"><h3>${r.race_name}</h3><span class="outcome outcome-${outcome}">${outcomeLabel}</span></div><p>${p.reason}</p><div class="bets">${betHtml}</div></div><div class="race-result">${money}<small>信頼度 ${p.confidence}%</small></div></article>`;
   }).join('')||'<div class="empty panel">この戦略の予想はまだありません</div>';
 }
-function statsFor(strategy){const bets=allBets.filter(b=>b.strategy===strategy),staked=bets.reduce((n,b)=>n+Number(b.stake),0),settled=bets.filter(b=>b.settlements?.length),returned=settled.reduce((n,b)=>n+Number(b.settlements[0].return_amount),0),hits=settled.filter(b=>b.settlements[0].is_hit).length;return{staked,returned,profit:returned-staked,roi:staked?returned/staked*100:0,hit:settled.length?hits/settled.length*100:0}}
+function statsFor(strategy){const bets=allBets.filter(b=>b.strategy===strategy),settlementOf=b=>Array.isArray(b.settlements)?b.settlements[0]:b.settlements,staked=bets.reduce((n,b)=>n+Number(b.stake),0),settled=bets.filter(b=>settlementOf(b)),returned=settled.reduce((n,b)=>n+Number(settlementOf(b).return_amount),0),hits=settled.filter(b=>settlementOf(b).is_hit).length;return{staked,returned,profit:returned-staked,roi:staked?returned/staked*100:0,hit:settled.length?hits/settled.length*100:0}}
 function renderAnalytics(){const s=accounts.map(a=>({...a,...statsFor(a.strategy)})),tot=s.reduce((x,a)=>({staked:x.staked+a.staked,returned:x.returned+a.returned}),{staked:0,returned:0});document.querySelector('#analysis-metrics').innerHTML=[['総予想',predictions.length],['総購入額',yen(tot.staked)],['総払戻額',yen(tot.returned)],['合算回収率',pct(tot.staked?tot.returned/tot.staked*100:0)]].map(x=>`<div class="metric"><small>${x[0]}</small><strong>${x[1]}</strong></div>`).join('');document.querySelector('#analysis-table').innerHTML=s.map(a=>`<tr><td><span class="badge ${a.strategy}">${labels[a.strategy]}</span></td><td>${yen(a.staked)}</td><td>${yen(a.returned)}</td><td class="${a.profit>=0?'positive':'negative'}">${yen(a.profit)}</td><td>${pct(a.roi)}</td><td>${pct(a.hit)}</td><td>${yen(a.minimum_balance)}</td></tr>`).join('')}
 function renderAudit(){document.querySelector('#audit-list').innerHTML=batches.map(b=>`<div class="audit-row"><b>${new Date(b.started_at).toLocaleString('ja-JP')}</b><span>${b.parser_version}<small>${b.races_fetched}レース / API ${b.api_requests}回${b.error_message?' / '+b.error_message:''}</small></span><em class="status ${b.status}">${b.status}</em></div>`).join('')||'<p class="empty">履歴はありません</p>'}
 function showError(message){const el=document.querySelector('#error');el.hidden=false;el.textContent=message}
