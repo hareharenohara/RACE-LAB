@@ -25,6 +25,7 @@ export interface RaceSummary {
 }
 
 export interface Entry {
+  umaxScores: { horse_id: string };
   horseNumber: number;
   gateNumber?: number;
   horseName: string;
