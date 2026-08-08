@@ -1,32 +1,26 @@
-const MODEL = "gemini-3.6-flash";
-
-export interface GeminiResult {
-  value: unknown;
-  raw: unknown;
-  inputTokens?: number;
-  outputTokens?: number;
-}
-
-export async function callGemini(prompt: string, responseSchema: Record<string, unknown>): Promise<GeminiResult> {
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) throw new Error("GEMINI_API_KEY_MISSING");
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json", responseSchema },
-    }),
-  });
-  const raw = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`GEMINI_HTTP_${response.status}:${JSON.stringify(raw).slice(0, 500)}`);
-  const text = raw?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("");
-  if (!text) throw new Error("GEMINI_EMPTY_RESPONSE");
-  return {
-    value: JSON.parse(text), raw,
-    inputTokens: raw?.usageMetadata?.promptTokenCount,
-    outputTokens: raw?.usageMetadata?.candidatesTokenCount,
-  };
-}
-
-export { MODEL };
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RACE LAB｜AI競馬予想・収益検証</title><link rel="stylesheet" href="./styles.css"><link rel="stylesheet" href="./ui.css">
+</head>
+<body>
+  <div id="auth" class="auth-layer">
+    <form id="auth-form" class="auth-card"><div class="auth-logo">R</div><p class="eyebrow">PRIVATE ANALYTICS</p><h1>RACE LAB</h1><p>AI競馬予想・収益検証システム</p>
+      <label>メールアドレス<input id="email" type="email" required autocomplete="email"></label>
+      <label>パスワード<input id="password" type="password" minlength="6" required autocomplete="current-password"></label>
+      <button type="submit">ログイン</button><button type="button" id="signup" class="secondary">初回アカウント作成</button><small id="auth-message"></small>
+    </form>
+  </div>
+  <aside class="sidebar"><div class="brand"><span>R</span><div>RACE LAB<small>AI収益検証</small></div></div>
+    <nav><button class="active" data-page="dashboard">ダッシュボード</button><button data-page="today">本日の予想</button><button data-page="analytics">成績分析</button><button data-page="audit">実行履歴</button></nav>
+    <div class="sidebar-foot"><i></i> JRA自動運用中<br><small>予想 土日07:00</small><button id="logout">ログアウト</button></div>
+  </aside>
+  <main><header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">ダッシュボード</h1></div><div class="header-meta"><span>Gemini 3.6 Flash</span><b id="last-run">データ読込中</b></div></header>
+    <div id="error" class="error" hidden></div>
+    <section id="dashboard" class="page active"><div class="hero"><div><p>3戦略 合算損益</p><strong id="total-profit">—</strong><small>開始資金 合計 ¥300,000</small></div><div class="hero-chart" id="hero-chart"></div></div><div class="strategy-grid" id="strategy-cards"></div><div class="two-col"><article class="panel"><div class="panel-title"><h2>戦略別資金</h2><span>現在残高</span></div><div class="balance-bars" id="balance-bars"></div></article><article class="panel"><div class="panel-title"><h2>最新バッチ</h2><span class="ok">稼働状況</span></div><div id="job-list"></div></article></div></section>
+    <section id="today" class="page"><div class="tabs" id="strategy-tabs"></div><div class="race-list" id="race-list"></div></section>
+    <section id="analytics" class="page"><div class="metrics" id="analysis-metrics"></div><article class="panel"><div class="panel-title"><h2>戦略別パフォーマンス</h2><span>全期間</span></div><div class="table-wrap"><table><thead><tr><th>戦略</th><th>購入額</th><th>払戻</th><th>損益</th><th>回収率</th><th>的中率</th><th>最低残高</th></tr></thead><tbody id="analysis-table"></tbody></table></div></article></section>
+    <section id="audit" class="page"><article class="panel"><div class="panel-title"><h2>バッチ実行履歴</h2><span>監査ログ</span></div><div id="audit-list"></div></article></section>
+  </main><script src="./app.js"></script>
+</body></html>
