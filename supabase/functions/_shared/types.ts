@@ -1,5 +1,12 @@
 export type Strategy = "conservative" | "balanced" | "aggressive";
-export type BetType = "win" | "place" | "wide" | "quinella" | "exacta" | "trio" | "trifecta";
+export type BetType =
+  | "win"
+  | "place"
+  | "wide"
+  | "quinella"
+  | "exacta"
+  | "trio"
+  | "trifecta";
 
 export interface RaceOdds {
   type: BetType;
@@ -63,6 +70,7 @@ export interface PastRun {
   jockey?: string;
   weightCarried?: number;
   horseWeight?: number;
+  runnerCount?: number;
 }
 
 export interface RaceDataProvider {
