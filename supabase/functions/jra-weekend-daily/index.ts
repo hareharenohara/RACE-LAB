@@ -13,6 +13,10 @@ import {
   validateSelections,
 } from "../_shared/ai-contracts.ts";
 import type { PastRun, Strategy } from "../_shared/types.ts";
+import {
+  calibrateProbability,
+  type CalibrationProfile,
+} from "../_shared/probability-calibrator.ts";
 const json = (x: unknown, s = 200) =>
     new Response(JSON.stringify(x), {
       status: s,
@@ -361,6 +365,15 @@ Deno.serve(async (req) => {
         if (snapshotError) throw snapshotError;
       }
     }
+    const { data: calibrationRows, error: calibrationError } = await db.from(
+      "probability_calibration_profiles",
+    ).select("id,strategy,bet_type,bins").eq("is_active", true);
+    if (calibrationError) throw calibrationError;
+    const calibrations = new Map(
+      (calibrationRows ?? []).map(
+        (row) => [`${row.strategy}:${row.bet_type}`, row],
+      ),
+    );
     let pc = 0, bc = 0;
     for (const s of STRATEGIES) {
       const ids = new Set(sel[s].map((x) => x.race_id)),
@@ -422,6 +435,14 @@ Deno.serve(async (req) => {
         for (const b of p.bets as any[]) {
           const odds = market.get(`${p.race_id}:${ok(b.type, b.horses)}`);
           if (!odds) throw new Error("ODDS_NOT_FOUND");
+          const calibration = calibrations.get(`${s}:${b.type}`),
+            rawProbability = Number(b.estimated_probability),
+            estimatedProbability = calibrateProbability(
+              calibration?.bins as CalibrationProfile | undefined,
+              rawProbability,
+            ),
+            expectedValue = odds * estimatedProbability;
+          if (expectedValue < 1) continue;
           await db.from("bets").insert({
             prediction_id: pred.id,
             race_id: p.race_id,
@@ -430,8 +451,10 @@ Deno.serve(async (req) => {
             combination: b.horses,
             stake: b.stake,
             odds_at_prediction: odds,
-            estimated_probability: b.estimated_probability,
-            expected_value: odds * b.estimated_probability,
+            raw_estimated_probability: rawProbability,
+            estimated_probability: estimatedProbability,
+            calibration_profile_id: calibration?.id,
+            expected_value: expectedValue,
             reason: b.reason,
             stake_reason: b.stake_reason,
           });
