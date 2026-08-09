@@ -42,16 +42,16 @@
     <div id="pwa-update" class="update-toast" hidden><span>新しいバージョンを利用できます</span><button>今すぐ更新</button></div>
     <div id="error" class="error" hidden></div>
     <section id="dashboard" class="page active">
-      <div class="hero"><div><p>3戦略 合計損益</p><strong id="total-profit">—</strong><small>開始資金 合計 ¥300,000</small></div><div class="flow-mini"><span>DATA</span><b>→</b><span>AI</span><b>→</b><span>RULES</span><b>→</b><span>BET / SKIP</span></div></div>
+      <div class="hero"><div><p>単一AI 累計損益</p><strong id="total-profit">—</strong><small>開始資金 ¥100,000・1日上限 ¥10,000</small></div><div class="flow-mini"><span>DATA</span><b>→</b><span>AI ANALYSIS</span><b>→</b><span>VERIFY</span><b>→</b><span>BET / SKIP</span></div></div>
       <div class="strategy-grid" id="strategy-cards"></div>
-      <div class="two-col"><article class="panel"><div class="panel-title"><h2>戦略別資金</h2><span>現在残高</span></div><div id="balance-bars"></div></article><article class="panel"><div class="panel-title"><h2>最新バッチ</h2><span class="ok">監視中</span></div><div id="job-list"></div></article></div>
+      <div class="two-col"><article class="panel"><div class="panel-title"><h2>AI運用資金</h2><span>現在残高</span></div><div id="balance-bars"></div></article><article class="panel"><div class="panel-title"><h2>最新バッチ</h2><span class="ok">監視中</span></div><div id="job-list"></div></article></div>
     </section>
     <section id="today" class="page"><div class="tabs" id="strategy-tabs"></div><div id="race-list"></div></section>
     <section id="trace" class="page">
-      <div class="trace-head"><div><p class="eyebrow">END-TO-END TRACE</p><h2>AIに渡したデータから最終判断まで</h2><p>入力・AI回答・プログラム判定・購入結果を1本の流れで確認できます。</p></div><div class="filters"><select id="trace-purpose"><option value="all">全AI処理</option><option value="prediction">予測</option><option value="screening">レース選定</option></select><select id="trace-strategy"><option value="all">全戦略</option><option value="conservative">保守型</option><option value="balanced">バランス型</option><option value="aggressive">積極型</option></select></div></div>
+      <div class="trace-head"><div><p class="eyebrow">END-TO-END TRACE</p><h2>AIに渡したデータから最終判断まで</h2><p>一次分析・統合・詳細分析・買い目提案・最終判断を確認できます。</p></div><div class="filters"><select id="trace-purpose"><option value="all">全AI処理</option><option value="prediction">買い目提案</option><option value="screening">分析</option><option value="audit">最終判断</option></select><select id="trace-strategy"><option value="all">単一AI</option><option value="single">単一AI</option></select></div></div>
       <div class="trace-layout"><aside class="call-list" id="call-list"></aside><article class="trace-detail panel" id="trace-detail"><div class="empty-state"><b>AI処理を選択</b><span>左の履歴から確認したい処理を選んでください。</span></div></article></div>
     </section>
-    <section id="analytics" class="page"><div class="metrics" id="analysis-metrics"></div><article class="panel"><div class="panel-title"><h2>戦略別パフォーマンス</h2><span>確定済み馬券・全期間</span></div><div class="table-wrap"><table><thead><tr><th>戦略</th><th>購入額</th><th>払戻</th><th>損益</th><th>回収率</th><th>予測的中率</th><th>実的中率</th><th>確率誤差</th><th>Brier</th></tr></thead><tbody id="analysis-table"></tbody></table></div></article></section>
+    <section id="analytics" class="page"><div class="metrics" id="analysis-metrics"></div><article class="panel"><div class="panel-title"><h2>単一AIパフォーマンス</h2><span>確定済み馬券・全期間</span></div><div class="table-wrap"><table><thead><tr><th>AI</th><th>購入額</th><th>払戻</th><th>損益</th><th>回収率</th><th>予測的中率</th><th>実的中率</th><th>確率誤差</th><th>Brier</th></tr></thead><tbody id="analysis-table"></tbody></table></div></article></section>
     <section id="operations" class="page"><article class="panel"><div class="panel-title"><h2>バッチ実行履歴</h2><span>収集・予測・結果反映</span></div><div id="audit-list"></div></article></section>
   </main>
   <script src="./analytics-core.js"></script><script src="./app.js"></script>

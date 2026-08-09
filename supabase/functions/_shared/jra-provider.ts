@@ -40,12 +40,14 @@ export interface CollectedPastRun {
   raceDate: string;
   track: string;
   raceName: string;
+  raceClass?: string;
   surface?: "turf" | "dirt" | "jump";
   distance?: number;
   condition?: string;
   finishPosition?: number;
   popularity?: number;
   finishTime?: string;
+  cornerPositions?: number[];
   last3f?: number;
   margin?: number;
   jockey?: string;
@@ -57,6 +59,21 @@ export interface CollectedPastRun {
 
 const matchNumber = (value: string, pattern: RegExp) =>
   num(value.match(pattern)?.[1]);
+
+export function inferRaceClass(value: string): string | undefined {
+  const normalized = value.replace(/\s/g, "").toUpperCase();
+  if (/(G1|GⅠ|GI)(?!I)/.test(normalized)) return "G1";
+  if (/(G2|GⅡ|GII)(?!I)/.test(normalized)) return "G2";
+  if (/(G3|GⅢ|GIII)/.test(normalized)) return "G3";
+  if (/リステッド|\(L\)|（L）/.test(normalized)) return "listed";
+  if (/オープン|OPEN/.test(normalized)) return "open";
+  if (/3勝クラス|1600万下/.test(normalized)) return "3win";
+  if (/2勝クラス|1000万下/.test(normalized)) return "2win";
+  if (/1勝クラス|500万下/.test(normalized)) return "1win";
+  if (/未勝利/.test(normalized)) return "maiden";
+  if (/新馬/.test(normalized)) return "newcomer";
+  return undefined;
+}
 
 export function parsePastRunsHtml(html: string): CollectedPastRun[] {
   const $ = cheerio.load(html), runs: CollectedPastRun[] = [];
@@ -89,6 +106,7 @@ export function parsePastRunsHtml(html: string): CollectedPastRun[] {
         raceDate: `${date[1]}-${date[2]}-${date[3]}`,
         track: date[4],
         raceName: data02,
+        raceClass: inferRaceClass(data02),
         surface: course?.[1] === "芝"
           ? "turf" as const
           : course?.[1] === "ダ"
@@ -101,6 +119,8 @@ export function parsePastRunsHtml(html: string): CollectedPastRun[] {
         finishPosition: num(past.find(".Data01 .Num").first().text()),
         popularity: num(detail?.[2]),
         finishTime: data05.match(/\d+:\d+\.\d+/)?.[0],
+        cornerPositions: data06.match(/\b\d+(?:-\d+)+\b/)?.[0].split("-")
+          .map(Number),
         last3f: matchNumber(data06, /\(([\d.]+)\)/),
         margin: matchNumber(data07, /\(([-+\d.]+)\)\s*$/),
         jockey: detail?.[3],
@@ -123,7 +143,7 @@ export class JraProvider {
     const ids = [
       ...new Set([...html.matchAll(/race_id=(\d{12})/g)].map((m) => m[1])),
     ];
-    return ids.map((id) => {
+    return ids.map((id): RaceSummary => {
       const at = html.indexOf(`race_id=${id}`),
         segment = html.slice(Math.max(0, at - 700), at + 1000),
         raceNumber = Number(id.slice(-2)),
@@ -134,13 +154,16 @@ export class JraProvider {
           ...segment.matchAll(
             /<span[^>]*class="(?:ItemTitle|RaceName)"[^>]*>([\s\S]*?)<\/span>/g,
           ),
-        ];
+        ],
+        raceName = clean(names.at(-1)?.[1] ?? "") ||
+          `${track} ${raceNumber}R`;
       return {
         externalId: `jra:${id}`,
         raceDate: date,
         track,
         raceNumber,
-        raceName: clean(names.at(-1)?.[1] ?? "") || `${track} ${raceNumber}R`,
+        raceName,
+        raceClass: inferRaceClass(raceName),
         startTime: `${date}T${time}:00+09:00`,
         surface: course?.[1] === "芝" ? "turf" : "dirt",
         distance: num(course?.[2]),

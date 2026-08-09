@@ -22,6 +22,7 @@ export interface RaceSummary {
   track: string;
   raceNumber: number;
   raceName: string;
+  raceClass?: string;
   startTime: string;
   surface?: "turf" | "dirt" | "jump";
   distance?: number;
@@ -59,6 +60,7 @@ export interface PastRun {
   raceDate?: string;
   track?: string;
   raceName?: string;
+  raceClass?: string;
   surface?: string;
   distance?: number;
   condition?: string;
@@ -66,6 +68,7 @@ export interface PastRun {
   popularity?: number;
   odds?: number;
   finishTime?: string;
+  cornerPositions?: number[];
   last3f?: number;
   margin?: number;
   jockey?: string;

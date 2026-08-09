@@ -43,3 +43,24 @@ select cron.schedule(
   );
   $job$
 );
+
+-- Consume exactly one staged AI operation per minute. This stays below the
+-- Gemini 5 RPM limit and lets failed stages retry without repeating successes.
+select cron.schedule(
+  'jra-prediction-worker-1min',
+  '* * * * *',
+  $job$
+  select net.http_post(
+    url := 'https://lgpvvwymvqzhoqkpuyjv.supabase.co/functions/v1/jra-prediction-worker',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-batch-secret', (
+        select decrypted_secret from vault.decrypted_secrets
+        where name = 'batch_secret' limit 1
+      )
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000
+  );
+  $job$
+);

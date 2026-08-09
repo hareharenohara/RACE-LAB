@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
     const { data: profile, error: profileError } = await db.from(
       "evaluation_weight_profiles",
     ).select(
-      "id,ability_weight,suitability_weight,condition_weight,race_context_weight",
+      "id,ability_weight,suitability_weight,condition_weight,race_context_weight,formula_version",
     ).eq("is_active", true).single();
     if (profileError) throw profileError;
     const { data: snapshots, error: snapshotError } = await db.from(
@@ -254,6 +254,7 @@ Deno.serve(async (req) => {
         suitability_weight: optimized.weights.suitability,
         condition_weight: optimized.weights.condition,
         race_context_weight: optimized.weights.raceContext,
+        formula_version: profile.formula_version,
         sample_size: optimized.sampleSize,
         training_brier: optimized.trainingBrier,
         validation_brier: optimized.validationBrier,

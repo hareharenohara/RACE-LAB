@@ -6,6 +6,7 @@ import {
   type EvaluationWeights,
 } from "../_shared/horse-evaluation.ts";
 import {
+  completeMissingPredictions,
   PREDICTION_SCHEMA,
   SELECTION_SCHEMA,
   STRATEGIES,
@@ -21,23 +22,73 @@ import {
   STRATEGY_POLICIES,
   strategyPrompt,
 } from "../_shared/strategy-policy.ts";
+import {
+  betCandidateKey,
+  buildBetCandidates,
+  selectCandidateShortlist,
+  selectTopRaceProposalIds,
+} from "../_shared/bet-candidates.ts";
 const json = (x: unknown, s = 200) =>
-    new Response(JSON.stringify(x), {
-      status: s,
-      headers: { "content-type": "application/json" },
-    }),
-  unordered = new Set(["wide", "quinella", "trio"]);
+  new Response(JSON.stringify(x), {
+    status: s,
+    headers: { "content-type": "application/json" },
+  });
 const h = async (x: unknown) =>
-    [
-      ...new Uint8Array(
-        await crypto.subtle.digest(
-          "SHA-256",
-          new TextEncoder().encode(JSON.stringify(x)),
-        ),
+  [
+    ...new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(JSON.stringify(x)),
       ),
-    ].map((b) => b.toString(16).padStart(2, "0")).join(""),
-  ok = (t: string, ns: number[]) =>
-    `${t}:${(unordered.has(t) ? [...ns].sort((a, b) => a - b) : ns).join("-")}`;
+    ),
+  ].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+type ScreeningRace = {
+  race_id: string;
+  track: string;
+  race_number: number;
+  race_name: string;
+  race_class?: string | null;
+  start_time: string;
+  surface?: string | null;
+  distance?: number | null;
+};
+
+// A full card contains very large exotic-odds tables. Keep the detailed stage
+// within the Edge worker budget while preserving representation from each venue.
+export function buildDetailedAnalysisPool(
+  races: ScreeningRace[],
+  limit = 6,
+): ScreeningRace[] {
+  const classPriority: Record<string, number> = {
+    G1: 7,
+    G2: 6,
+    G3: 5,
+    listed: 4,
+    open: 3,
+    "3win": 2,
+    "2win": 1,
+  };
+  const ranked = [...races].sort((a, b) =>
+    (classPriority[b.race_class ?? ""] ?? 0) -
+      (classPriority[a.race_class ?? ""] ?? 0) ||
+    b.race_number - a.race_number ||
+    a.start_time.localeCompare(b.start_time)
+  );
+  const selected: ScreeningRace[] = [], perTrack = new Map<string, number>();
+  for (const race of ranked) {
+    if ((perTrack.get(race.track) ?? 0) >= 2) continue;
+    selected.push(race);
+    perTrack.set(race.track, (perTrack.get(race.track) ?? 0) + 1);
+    if (selected.length === limit) return selected;
+  }
+  for (const race of ranked) {
+    if (selected.some((item) => item.race_id === race.race_id)) continue;
+    selected.push(race);
+    if (selected.length === limit) break;
+  }
+  return selected;
+}
 async function ai(
   db: any,
   batch: string,
@@ -135,6 +186,7 @@ Deno.serve(async (req) => {
         track: r.track,
         race_number: r.raceNumber,
         race_name: r.raceName,
+        race_class: r.raceClass,
         start_time: r.startTime,
         surface: r.surface,
         distance: r.distance,
@@ -146,53 +198,72 @@ Deno.serve(async (req) => {
       { data: saved, error: re } = await db.from("races").upsert(rows, {
         onConflict: "external_id",
       }).select(
-        "id,external_id,track,race_number,race_name,start_time,surface,distance",
+        "id,external_id,track,race_number,race_name,race_class,start_time,surface,distance",
       );
     if (re) throw re;
-    const screenInput = (saved ?? []).map((r) => ({
+    const raceQueue = (saved ?? []).map((row) => ({
+      race_id: String(row.id),
+      external_id: row.external_id,
+      track: row.track,
+      race_number: row.race_number,
+      race_name: row.race_name,
+      race_class: row.race_class,
+      start_time: row.start_time,
+      surface: row.surface,
+      distance: row.distance,
+    })).sort((a, b) =>
+      a.start_time.localeCompare(b.start_time) ||
+      a.track.localeCompare(b.track) ||
+      a.race_number - b.race_number
+    );
+    await db.from("batch_runs").update({
+      status: "running",
+      races_fetched: raceQueue.length,
+      api_requests: 1,
+      metadata: {
+        provider: "jra_netkeiba",
+        pipeline_version: "single-v1",
+        pipeline_stage: "analysis",
+        pipeline_attempts: {},
+        analysis_offset: 0,
+        analysis_chunk_size: 4,
+        race_queue: raceQueue,
+        analysis: { races: [] },
+      },
+    }).eq("id", batch.id);
+    return json({
+      status: "queued",
+      stage: "analysis",
+      races: raceQueue.length,
+      batchRunId: batch.id,
+    }, 202);
+
+    /* Previous in-process detail analysis retained temporarily for reference.
+    const allScreenInput = (saved ?? []).map((r) => ({
         race_id: r.id,
         track: r.track,
         race_number: r.race_number,
         race_name: r.race_name,
+        race_class: r.race_class,
         start_time: r.start_time,
         surface: r.surface,
         distance: r.distance,
       })
       ),
-      screen = await ai(
-        db,
-        batch.id,
-        "screening",
-        null,
-        `JRA中央競馬の一覧から保守型・バランス型・積極型ごとに最大3レースを選定。各戦略の目的と許容リスクに合い、後段の条件を満たす買い目が見込めるレースを優先。無理に選ばず空配列可。race_id厳守。戦略条件=${
-          JSON.stringify(STRATEGY_POLICIES)
-        }\n${JSON.stringify(screenInput)}`,
-        SELECTION_SCHEMA,
-      ),
+      screenInput = buildDetailedAnalysisPool(allScreenInput),
       valid = new Set(screenInput.map((r) => String(r.race_id))),
-      sel = validateSelections(screen.value, valid);
-    for (const s of STRATEGIES) {
-      for (let i = 0; i < sel[s].length; i++) {
-        await db.from("race_selections").insert({
-          batch_run_id: batch.id,
-          race_id: sel[s][i].race_id,
-          strategy: s,
-          score: sel[s][i].score,
-          reason: sel[s][i].reason,
-          rank: i + 1,
-          ai_call_id: screen.callId,
-        });
-      }
-    }
-    const chosen = new Set(
-        STRATEGIES.flatMap((s) => sel[s].map((x) => x.race_id)),
-      ),
+      chosen = new Set(screenInput.map((r) => String(r.race_id))),
       details = new Map<
         string,
         Awaited<ReturnType<JraProvider["getDetail"]>>
       >(),
       horseDbIds = new Map<string, string>();
-    let historyRequests = 0, historyRows = 0, historyErrors = 0;
+    let historyRequests = 0,
+      historyRows = 0,
+      historyErrors = 0,
+      historyClassRows = 0,
+      historyTimeRows = 0,
+      historyCornerRows = 0;
     for (const id of chosen) {
       const row = (saved ?? []).find((r) => r.id === id)!,
         summary = races.find((r) => r.externalId === row.external_id)!;
@@ -243,12 +314,14 @@ Deno.serve(async (req) => {
                 race_date: run.raceDate,
                 track: run.track,
                 race_name: run.raceName,
+                race_class: run.raceClass,
                 surface: run.surface,
                 distance: run.distance,
                 condition: run.condition,
                 finish_position: run.finishPosition,
                 popularity: run.popularity,
                 finish_time: run.finishTime,
+                corner_positions: run.cornerPositions,
                 last3f: run.last3f,
                 margin: run.margin === undefined ? null : String(run.margin),
                 jockey: run.jockey,
@@ -260,6 +333,11 @@ Deno.serve(async (req) => {
               })),
             ];
           }));
+        historyClassRows += collected.filter((run) => run.raceClass).length;
+        historyTimeRows += collected.filter((run) => run.finishTime).length;
+        historyCornerRows += collected.filter((run) =>
+          run.cornerPositions?.length
+        ).length;
         if (rows.length) {
           const { error: historyError } = await db.from("past_runs").upsert(
             rows,
@@ -280,7 +358,7 @@ Deno.serve(async (req) => {
     const dbHorseIds = [...new Set(horseDbIds.values())],
       { data: pastRows, error: pastError } = dbHorseIds.length
         ? await db.from("past_runs").select(
-          "horse_id,race_date,track,race_name,surface,distance,condition,finish_position,popularity,odds,finish_time,last3f,margin,jockey,weight_carried,horse_weight,runner_count",
+          "horse_id,race_date,track,race_name,race_class,surface,distance,condition,finish_position,popularity,odds,finish_time,corner_positions,last3f,margin,jockey,weight_carried,horse_weight,runner_count",
         ).in("horse_id", dbHorseIds).order("race_date", { ascending: false })
           .limit(
             1000,
@@ -300,6 +378,7 @@ Deno.serve(async (req) => {
         raceDate: row.race_date,
         track: row.track,
         raceName: row.race_name,
+        raceClass: row.race_class,
         surface: row.surface,
         distance: row.distance,
         condition: row.condition,
@@ -307,6 +386,7 @@ Deno.serve(async (req) => {
         popularity: row.popularity,
         odds: row.odds,
         finishTime: row.finish_time,
+        cornerPositions: row.corner_positions,
         last3f: row.last3f,
         margin: row.margin == null ? undefined : Number(row.margin),
         jockey: row.jockey,
@@ -319,7 +399,7 @@ Deno.serve(async (req) => {
     const { data: weightProfile, error: weightError } = await db.from(
       "evaluation_weight_profiles",
     ).select(
-      "id,ability_weight,suitability_weight,condition_weight,race_context_weight",
+      "id,ability_weight,suitability_weight,condition_weight,race_context_weight,formula_version",
     ).eq("is_active", true).single();
     if (weightError) throw weightError;
     const evaluationWeights: EvaluationWeights = {
@@ -378,19 +458,196 @@ Deno.serve(async (req) => {
         (row) => [`${row.strategy}:${row.bet_type}`, row],
       ),
     );
+    const selectionEligibility = new Map<Strategy, Set<string>>(),
+      selectionFallbackScores = new Map<Strategy, Map<string, number>>(),
+      selectionInput = Object.fromEntries(STRATEGIES.map((strategy) => {
+        const policy = STRATEGY_POLICIES[strategy],
+          eligibleRaceIds = new Set<string>(),
+          fallbackScores = new Map<string, number>();
+        selectionEligibility.set(strategy, eligibleRaceIds);
+        selectionFallbackScores.set(strategy, fallbackScores);
+        const raceAssessments = screenInput.map((race) => {
+          const detail = details.get(String(race.race_id))!,
+            evaluations = evaluationsByRace.get(String(race.race_id))!,
+            candidates = buildBetCandidates(evaluations, detail.odds)
+              .filter((candidate) =>
+                policy.allowedBetTypes.includes(candidate.type)
+              )
+              .map((candidate) => {
+                const calibration = calibrations.get(
+                    `${strategy}:${candidate.type}`,
+                  ),
+                  probability = calibrateProbability(
+                    calibration?.bins as CalibrationProfile | undefined,
+                    candidate.estimatedProbability,
+                  ),
+                  expectedValue = Number(
+                    (probability * candidate.odds).toFixed(4),
+                  );
+                return {
+                  candidate_id: betCandidateKey(
+                    candidate.type,
+                    candidate.horses,
+                  ),
+                  type: candidate.type,
+                  horses: candidate.horses,
+                  odds: candidate.odds,
+                  estimated_probability: probability,
+                  expected_value: expectedValue,
+                  data_quality: candidate.dataQuality,
+                  eligible:
+                    candidate.dataQuality >= policy.minimumDataQuality &&
+                    expectedValue >= policy.minimumExpectedValue,
+                };
+              }).sort((a, b) =>
+                Number(b.eligible) - Number(a.eligible) ||
+                b.expected_value - a.expected_value
+              ),
+            eligibleCandidates = candidates.filter((candidate) =>
+              candidate.eligible
+            ),
+            topEvaluations = [...evaluations].sort((a, b) =>
+              b.overallScore - a.overallScore
+            ).slice(0, 5).map((evaluation) => {
+              const entry = detail.entries.find((item) =>
+                item.horseNumber === evaluation.horseNumber
+              );
+              return {
+                horse_number: evaluation.horseNumber,
+                horse_name: evaluation.horseName,
+                jockey: entry?.jockey,
+                trainer: entry?.trainer,
+                overall_score: evaluation.overallScore,
+                estimated_win_probability: evaluation.estimatedWinProbability,
+                data_quality: evaluation.dataQuality,
+              };
+            });
+          if (eligibleCandidates.length) {
+            eligibleRaceIds.add(String(race.race_id));
+            fallbackScores.set(
+              String(race.race_id),
+              eligibleCandidates[0].expected_value *
+                eligibleCandidates[0].data_quality,
+            );
+          }
+          return {
+            ...race,
+            runner_count: detail.entries.length,
+            top_horses: topEvaluations,
+            eligible_candidate_count: eligibleCandidates.length,
+            maximum_expected_value: eligibleCandidates[0]?.expected_value ??
+              null,
+            candidates: candidates.slice(0, 12),
+          };
+        });
+        return [strategy, {
+          policy,
+          instruction:
+            "Select five races when at least five have eligible candidates; otherwise select every eligible race up to five. Rank by fit with this strategy's objective, candidate quality, expected value, market options, and data reliability. Never select a race without an eligible candidate.",
+          races: raceAssessments,
+        }];
+      }));
+
+    // The collection/evaluation phase ends here. AI work is consumed one call
+    // per invocation by jra-prediction-worker so RPM, memory and retries remain
+    // isolated and successful stages never need to be repeated.
+    await db.from("batch_runs").update({
+      status: "running",
+      races_fetched: races.length,
+      api_requests: 2 + chosen.size + historyRequests,
+      metadata: {
+        provider: "jra_netkeiba",
+        pipeline_version: "staged-v1",
+        pipeline_stage: "selection:conservative",
+        pipeline_attempts: {},
+        analysis: selectionInput,
+        details: chosen.size,
+        history_requests: historyRequests,
+        history_rows: historyRows,
+        history_errors: historyErrors,
+        formula_version: weightProfile.formula_version,
+      },
+    }).eq("id", batch.id);
+    return json({
+      status: "queued",
+      stage: "selection:conservative",
+      races: races.length,
+      details: chosen.size,
+      batchRunId: batch.id,
+    }, 202);
+
+    // Legacy monolithic AI/persistence path intentionally disabled.
+    const screen = await ai(
+        db,
+        batch.id,
+        "screening",
+        null,
+        `全レースについて出走馬、過去走評価、推定勝率、データ品質、実在オッズ、券種別補正確率・期待値を計算済み。保守型・バランス型・積極型の目的と制約を個別に理解し、各戦略で購入条件を満たす候補があるレースを5件選定する。適格レースが5件未満の場合だけ、それ以下を許可する。eligible_candidate_count=0のレースは選定禁止。scoreはその戦略への適合度、reasonには候補券種・期待値・品質と戦略目的の関係を具体的に記載。race_id厳守。\n${
+          JSON.stringify(selectionInput)
+        }`,
+        SELECTION_SCHEMA,
+      ),
+      proposedSelections = validateSelections(screen.value, valid),
+      sel = Object.fromEntries(STRATEGIES.map((strategy) => {
+        const selected = proposedSelections[strategy].filter((selection) =>
+            selectionEligibility.get(strategy)!.has(selection.race_id)
+          ),
+          selectedIds = new Set(selected.map((selection) => selection.race_id)),
+          supplements = [...selectionFallbackScores.get(strategy)!.entries()]
+            .filter(([raceId]) => !selectedIds.has(raceId))
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, Math.max(0, 5 - selected.length))
+            .map(([raceId, score]) => ({
+              race_id: raceId,
+              score: Math.min(100, Math.max(0, Math.round(score * 50))),
+              reason:
+                "選定AIの不足枠を、戦略条件を満たす期待値・データ品質上位レースで補完",
+            }));
+        return [strategy, [...selected, ...supplements].slice(0, 5)];
+      })) as ReturnType<typeof validateSelections>;
+    for (const strategy of STRATEGIES) {
+      for (let rank = 0; rank < sel[strategy].length; rank++) {
+        const { error: selectionError } = await db.from("race_selections")
+          .insert({
+            batch_run_id: batch.id,
+            race_id: sel[strategy][rank].race_id,
+            strategy,
+            score: sel[strategy][rank].score,
+            reason: sel[strategy][rank].reason,
+            rank: rank + 1,
+            ai_call_id: screen.callId,
+          });
+        if (selectionError) throw selectionError;
+      }
+    }
     let pc = 0, bc = 0;
     for (const s of STRATEGIES) {
       const ids = new Set(sel[s].map((x) => x.race_id)),
         input = [...ids].map((id) => {
           const d = details.get(id)!;
+          const evaluations = evaluationsByRace.get(id)!;
+          const candidates = buildBetCandidates(evaluations, d.odds);
           return {
             race_id: id,
+            candidate_instructions:
+              "Compare expected_value and data_quality across every allowed ticket type instead of defaulting to win bets. Proposals must copy type, horses, and estimated_probability exactly from bet_candidates. SKIP when none meets the strategy policy.",
             race: d.race,
             entries: d.entries,
-            evaluations: evaluationsByRace.get(id)!,
+            evaluations,
             odds: d.odds.sort((a, b) =>
               (a.popularity ?? 9999) - (b.popularity ?? 9999)
             ).slice(0, 350),
+            bet_candidates: selectCandidateShortlist(
+              candidates,
+              STRATEGY_POLICIES[s].allowedBetTypes,
+            ).map((candidate) => ({
+              type: candidate.type,
+              horses: candidate.horses,
+              odds: candidate.odds,
+              estimated_probability: candidate.estimatedProbability,
+              expected_value: candidate.expectedValue,
+              data_quality: candidate.dataQuality,
+            })),
           };
         }),
         { data: account } = await db.from("strategy_accounts").select(
@@ -403,7 +660,7 @@ Deno.serve(async (req) => {
           s,
           `${
             strategyPrompt(s, Number(account?.current_balance ?? 100000))
-          } evaluationsは過去走から決定論的に計算した総合評価で、オッズや現在人気を含まない。入力にある買い目だけ提案。各買い目にreason（評価値とオッズに基づく具体的理由）とstake_reason（期待値・確率・戦略・残高に基づく購入金額の根拠）を必ず記載。\n${
+          } 選定された最大5レースをすべて評価し、各レースについてBETまたはSKIPを返す。BET候補の中でも特に優秀な最大3レースだけがプログラムに採用される。evaluationsは過去走から決定論的に計算した総合評価で、オッズや現在人気を含まない。入力にある買い目だけ提案。各買い目にreason（評価値とオッズに基づく具体的理由）とstake_reason（期待値・確率・戦略・残高に基づく購入金額の根拠）を必ず記載。\n${
             JSON.stringify(input)
           }`,
           PREDICTION_SCHEMA,
@@ -414,14 +671,63 @@ Deno.serve(async (req) => {
             new Set(x.entries.map((e) => e.horseNumber)),
           ]),
         ),
-        checked = validatePredictions(pr.value, s, ids, numbers),
-        market = new Map<string, number>();
+        checked = validatePredictions(
+          completeMissingPredictions(pr.value, s, ids),
+          s,
+          ids,
+          numbers,
+        ),
+        market = new Map<string, { odds: number; probability: number }>();
       for (const x of input) {
-        for (const o of x.odds) {
-          market.set(`${x.race_id}:${ok(o.type, o.horses)}`, o.odds);
+        const allOdds = details.get(String(x.race_id))!.odds;
+        for (const candidate of buildBetCandidates(x.evaluations, allOdds)) {
+          market.set(
+            `${x.race_id}:${betCandidateKey(candidate.type, candidate.horses)}`,
+            {
+              odds: candidate.odds,
+              probability: candidate.estimatedProbability,
+            },
+          );
         }
       }
       const policy = STRATEGY_POLICIES[s];
+      const acceptedRaceIds = selectTopRaceProposalIds(
+        checked.predictions.map((prediction: any) => {
+          const evaluations =
+              evaluationsByRace.get(String(prediction.race_id)) ?? [],
+            eligibleScores = (prediction.bets as any[]).flatMap((bet) => {
+              const marketCandidate = market.get(
+                  `${prediction.race_id}:${
+                    betCandidateKey(bet.type, bet.horses)
+                  }`,
+                ),
+                quality = Math.min(
+                  ...bet.horses.map((horse: number) =>
+                    evaluations.find((item) => item.horseNumber === horse)
+                      ?.dataQuality ?? 0
+                  ),
+                );
+              if (
+                !marketCandidate || !policy.allowedBetTypes.includes(bet.type)
+              ) return [];
+              const calibration = calibrations.get(`${s}:${bet.type}`),
+                probability = calibrateProbability(
+                  calibration?.bins as CalibrationProfile | undefined,
+                  marketCandidate.probability,
+                ),
+                expectedValue = marketCandidate.odds * probability;
+              return quality >= policy.minimumDataQuality &&
+                  expectedValue >= policy.minimumExpectedValue
+                ? [expectedValue * quality]
+                : [];
+            });
+          return {
+            raceId: String(prediction.race_id),
+            action: String(prediction.action),
+            score: eligibleScores.length ? Math.max(...eligibleScores) : null,
+          };
+        }),
+      );
       let dayStake = 0;
       for (const p of checked.predictions) {
         const { data: pred, error: pe } = await db.from("predictions").insert({
@@ -440,7 +746,10 @@ Deno.serve(async (req) => {
         pc++;
         let raceStake = 0;
         for (const b of p.bets as any[]) {
-          const odds = market.get(`${p.race_id}:${ok(b.type, b.horses)}`);
+          const marketCandidate = market.get(
+              `${p.race_id}:${betCandidateKey(b.type, b.horses)}`,
+            ),
+            odds = marketCandidate?.odds;
           const evaluations = evaluationsByRace.get(String(p.race_id)) ?? [],
             quality = Math.min(
               ...b.horses.map((horse: number) =>
@@ -449,7 +758,8 @@ Deno.serve(async (req) => {
               ),
             );
           const calibration = calibrations.get(`${s}:${b.type}`),
-            rawProbability = Number(b.estimated_probability),
+            rawProbability = marketCandidate?.probability ??
+              Number(b.estimated_probability),
             estimatedProbability = calibrateProbability(
               calibration?.bins as CalibrationProfile | undefined,
               rawProbability,
@@ -459,15 +769,25 @@ Deno.serve(async (req) => {
             reasonCode = "ODDS_NOT_FOUND",
             reasonDetail = "市場オッズが見つからないため見送り",
             stake = 0;
-          if (odds && !policy.allowedBetTypes.includes(b.type)) {
+          if (p.action === "BET" && !acceptedRaceIds.has(String(p.race_id))) {
+            reasonCode = "RACE_PROPOSAL_NOT_TOP_THREE";
+            reasonDetail =
+              "5レースの提案比較で上位3レースに入らなかったため見送り";
+          } else if (odds && !policy.allowedBetTypes.includes(b.type)) {
             reasonCode = "BET_TYPE_NOT_ALLOWED";
             reasonDetail = "この戦略で許可されていない券種のため見送り";
           } else if (odds && quality < policy.minimumDataQuality) {
             reasonCode = "DATA_QUALITY_LOW";
-            reasonDetail = `データ品質 ${quality.toFixed(2)} が基準 ${policy.minimumDataQuality.toFixed(2)} 未満`;
-          } else if (odds && Number(expectedValue) < policy.minimumExpectedValue) {
+            reasonDetail = `データ品質 ${quality.toFixed(2)} が基準 ${
+              policy.minimumDataQuality.toFixed(2)
+            } 未満`;
+          } else if (
+            odds && Number(expectedValue) < policy.minimumExpectedValue
+          ) {
             reasonCode = "EXPECTED_VALUE_LOW";
-            reasonDetail = `期待値 ${Number(expectedValue).toFixed(2)} が基準 ${policy.minimumExpectedValue.toFixed(2)} 未満`;
+            reasonDetail = `期待値 ${Number(expectedValue).toFixed(2)} が基準 ${
+              policy.minimumExpectedValue.toFixed(2)
+            } 未満`;
           } else if (odds) {
             stake = Math.floor(
               Math.min(
@@ -481,56 +801,62 @@ Deno.serve(async (req) => {
               reasonDetail = "レースまたは1日の購入上限に達したため見送り";
             } else {
               decision = stake < Number(b.stake) ? "reduced" : "purchased";
-              reasonCode = decision === "reduced" ? "STAKE_REDUCED" : "PURCHASED";
+              reasonCode = decision === "reduced"
+                ? "STAKE_REDUCED"
+                : "PURCHASED";
               reasonDetail = decision === "reduced"
-                ? `上限に合わせて ${Number(b.stake)}円から${stake}円へ減額して購入`
+                ? `上限に合わせて ${
+                  Number(b.stake)
+                }円から${stake}円へ減額して購入`
                 : "すべての基準を通過したため購入";
             }
           }
           let betId: string | null = null;
           if (decision !== "rejected") {
-            const { data: savedBet, error: betError } = await db.from("bets").insert({
-              prediction_id: pred.id,
-              race_id: p.race_id,
-              strategy: s,
-              bet_type: b.type,
-              combination: b.horses,
-              stake,
-              odds_at_prediction: odds,
-              raw_estimated_probability: rawProbability,
-              estimated_probability: estimatedProbability,
-              calibration_profile_id: calibration?.id,
-              expected_value: expectedValue,
-              reason: b.reason,
-              stake_reason: b.stake_reason,
-            }).select("id").single();
+            const { data: savedBet, error: betError } = await db.from("bets")
+              .insert({
+                prediction_id: pred.id,
+                race_id: p.race_id,
+                strategy: s,
+                bet_type: b.type,
+                combination: b.horses,
+                stake,
+                odds_at_prediction: odds,
+                raw_estimated_probability: rawProbability,
+                estimated_probability: estimatedProbability,
+                calibration_profile_id: calibration?.id,
+                expected_value: expectedValue,
+                reason: b.reason,
+                stake_reason: b.stake_reason,
+              }).select("id").single();
             if (betError) throw betError;
             betId = savedBet.id;
             raceStake += stake;
             dayStake += stake;
             bc++;
           }
-          const { error: decisionError } = await db.from("bet_decisions").insert({
-            prediction_id: pred.id,
-            bet_id: betId,
-            race_id: p.race_id,
-            strategy: s,
-            bet_type: b.type,
-            combination: b.horses,
-            proposed_stake: Number(b.stake),
-            final_stake: stake,
-            odds,
-            raw_probability: rawProbability,
-            calibrated_probability: estimatedProbability,
-            expected_value: expectedValue,
-            minimum_expected_value: policy.minimumExpectedValue,
-            data_quality: Number.isFinite(quality) ? quality : 0,
-            minimum_data_quality: policy.minimumDataQuality,
-            decision,
-            reason_code: reasonCode,
-            reason_detail: reasonDetail,
-            calibration_profile_id: calibration?.id,
-          });
+          const { error: decisionError } = await db.from("bet_decisions")
+            .insert({
+              prediction_id: pred.id,
+              bet_id: betId,
+              race_id: p.race_id,
+              strategy: s,
+              bet_type: b.type,
+              combination: b.horses,
+              proposed_stake: Number(b.stake),
+              final_stake: stake,
+              odds,
+              raw_probability: rawProbability,
+              calibrated_probability: estimatedProbability,
+              expected_value: expectedValue,
+              minimum_expected_value: policy.minimumExpectedValue,
+              data_quality: Number.isFinite(quality) ? quality : 0,
+              minimum_data_quality: policy.minimumDataQuality,
+              decision,
+              reason_code: reasonCode,
+              reason_detail: reasonDetail,
+              calibration_profile_id: calibration?.id,
+            });
           if (decisionError) throw decisionError;
         }
       }
@@ -538,7 +864,7 @@ Deno.serve(async (req) => {
     await db.from("batch_runs").update({
       status: "succeeded",
       races_fetched: races.length,
-      api_requests: 2 + chosen.size * 2 + historyRequests + 4,
+      api_requests: 2 + chosen.size + historyRequests + 4,
       finished_at: new Date().toISOString(),
       metadata: {
         provider: "jra_netkeiba",
@@ -546,6 +872,10 @@ Deno.serve(async (req) => {
         history_requests: historyRequests,
         history_rows: historyRows,
         history_errors: historyErrors,
+        history_class_rows: historyClassRows,
+        history_time_rows: historyTimeRows,
+        history_corner_rows: historyCornerRows,
+        formula_version: weightProfile.formula_version,
         predictions: pc,
         bets: bc,
       },
@@ -560,6 +890,7 @@ Deno.serve(async (req) => {
       bets: bc,
       batchRunId: batch.id,
     });
+    */
   } catch (e) {
     await db.from("batch_runs").update({
       status: "failed",

@@ -1,7 +1,7 @@
 -- AI競馬予想・収益検証 MVP schema
 create extension if not exists pgcrypto;
 
-create type public.strategy_type as enum ('conservative','balanced','aggressive');
+create type public.strategy_type as enum ('conservative','balanced','aggressive','single');
 create type public.race_status as enum ('scheduled','running','finished','cancelled');
 create type public.prediction_action as enum ('bet','skip');
 create type public.bet_type as enum ('win','place','wide','quinella','exacta','trio','trifecta');
@@ -42,6 +42,7 @@ create table public.past_runs (
   id uuid primary key default gen_random_uuid(), horse_id uuid not null references public.horses(id),
   race_date date not null, track text, race_name text, race_class text, surface text, distance smallint,
   condition text, finish_position smallint, popularity smallint, odds numeric(10,2), finish_time text,
+  corner_positions smallint[],
   last3f numeric(4,1), margin text, jockey text, weight_carried numeric(4,1), horse_weight smallint,
   runner_count smallint, source_hash text not null, raw_data jsonb not null default '{}'::jsonb,
   unique(horse_id, race_date, track, race_name)
@@ -56,7 +57,7 @@ create table public.batch_runs (
 
 create table public.ai_calls (
   id uuid primary key default gen_random_uuid(), batch_run_id uuid references public.batch_runs(id),
-  purpose text not null check (purpose in ('screening','prediction')), strategy public.strategy_type,
+  purpose text not null check (purpose in ('screening','prediction','audit')), strategy public.strategy_type,
   provider text not null default 'google', model text not null default 'gemini-3.6-flash',
   prompt_version text not null, input_hash text not null, output_hash text,
   request_json jsonb not null, response_json jsonb, input_tokens integer, output_tokens integer,
@@ -68,18 +69,20 @@ create table public.race_selections (
   id uuid primary key default gen_random_uuid(), batch_run_id uuid not null references public.batch_runs(id),
   race_id uuid not null references public.races(id), strategy public.strategy_type not null,
   score smallint not null check(score between 0 and 100), reason text not null,
-  rank smallint not null check(rank between 1 and 3), ai_call_id uuid not null references public.ai_calls(id),
+  rank smallint not null check(rank between 1 and 5), ai_call_id uuid not null references public.ai_calls(id),
   created_at timestamptz not null default now(), unique(batch_run_id,strategy,rank), unique(batch_run_id,strategy,race_id)
 );
 
 create table public.predictions (
   id uuid primary key default gen_random_uuid(), race_id uuid not null references public.races(id),
+  batch_run_id uuid references public.batch_runs(id),
   strategy public.strategy_type not null, ai_call_id uuid not null references public.ai_calls(id),
   action public.prediction_action not null, confidence smallint not null check(confidence between 0 and 100),
   reason text not null, input_hash text not null, prediction_hash text not null,
   predicted_at timestamptz not null, locked_at timestamptz not null default now(), raw_response jsonb not null,
   unique(race_id,strategy,predicted_at)
 );
+create unique index predictions_batch_strategy_race_idx on public.predictions(batch_run_id,strategy,race_id) where batch_run_id is not null;
 
 create table public.bets (
   id uuid primary key default gen_random_uuid(), prediction_id uuid not null references public.predictions(id),
@@ -124,12 +127,13 @@ create table public.strategy_accounts (
   total_returned bigint not null default 0, minimum_balance integer not null default 100000,
   updated_at timestamptz not null default now()
 );
-insert into public.strategy_accounts(strategy) values ('conservative'),('balanced'),('aggressive');
+insert into public.strategy_accounts(strategy) values ('single');
 
 create table public.evaluation_weight_profiles (
   id uuid primary key default gen_random_uuid(), ability_weight numeric(5,4) not null,
   suitability_weight numeric(5,4) not null, condition_weight numeric(5,4) not null,
-  race_context_weight numeric(5,4) not null, sample_size integer not null default 0,
+  race_context_weight numeric(5,4) not null, formula_version text not null default 'horse-v1',
+  sample_size integer not null default 0,
   training_brier numeric(10,8), validation_brier numeric(10,8), improvement numeric(10,8),
   is_active boolean not null default false, created_at timestamptz not null default now(),
   check (abs(ability_weight+suitability_weight+condition_weight+race_context_weight-1)<0.0001)

@@ -26,6 +26,9 @@ export interface HorseFeatures {
   jockeyPartnership: number;
   weightCarriedChange: number | null;
   layoffDays: number | null;
+  averageSpeed: number | null;
+  averageFinalCornerRatio: number | null;
+  averageClassLevel: number | null;
 }
 
 export interface EvaluationWeights {
@@ -56,6 +59,23 @@ const mean = (values: number[], fallback = 50) =>
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : fallback;
 const weights = [1, 0.75, 0.55, 0.4, 0.3];
+const classLevels: Record<string, number> = {
+  newcomer: 1,
+  maiden: 2,
+  "1win": 3,
+  "2win": 4,
+  "3win": 5,
+  open: 6,
+  listed: 7,
+  G3: 8,
+  G2: 9,
+  G1: 10,
+};
+
+const timeSeconds = (value?: string) => {
+  const match = value?.match(/^(\d+):(\d+(?:\.\d+)?)$/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+};
 
 function weightedMean(values: number[], fallback = 50) {
   if (!values.length) return fallback;
@@ -121,6 +141,21 @@ export function buildHorseFeatures(
       ? runs.filter((run) => run.jockey === entry.jockey)
       : [],
     latestWeight = runs.find((run) => run.weightCarried != null)?.weightCarried;
+  const speeds = runs.flatMap((run) => {
+      const seconds = timeSeconds(run.finishTime);
+      return seconds && run.distance ? [run.distance / seconds] : [];
+    }),
+    finalCornerRatios = runs.flatMap((run) => {
+      const finalCorner = run.cornerPositions?.at(-1);
+      return finalCorner && run.runnerCount
+        ? [finalCorner / run.runnerCount]
+        : [];
+    }),
+    levels = runs.flatMap((run) =>
+      run.raceClass && classLevels[run.raceClass] != null
+        ? [classLevels[run.raceClass]]
+        : []
+    );
   return {
     recentForm: round(weightedMean(runs.map(finishScore))),
     formTrend: round(clamp(50 + (recent - older) * 0.75)),
@@ -135,6 +170,11 @@ export function buildHorseFeatures(
       ? round(entry.weightCarried - latestWeight)
       : null,
     layoffDays: layoffDays(runs, race.raceDate),
+    averageSpeed: speeds.length ? round(mean(speeds), 3) : null,
+    averageFinalCornerRatio: finalCornerRatios.length
+      ? round(mean(finalCornerRatios), 3)
+      : null,
+    averageClassLevel: levels.length ? round(mean(levels), 2) : null,
   };
 }
 

@@ -40,7 +40,7 @@ export function validateSelections(
     }));
     const ids = items.map((item) => item.race_id);
     if (
-      ids.length > 3 || new Set(ids).size !== ids.length ||
+      ids.length > 5 || new Set(ids).size !== ids.length ||
       ids.some((id) => !validRaceIds.has(id))
     ) throw new Error(`SELECTION_${strategy}_INVALID`);
     if (
@@ -115,14 +115,49 @@ export function validatePredictions(
       ) throw new Error("BET_REASON_INVALID");
     }
   }
+  if (seen.size !== validRaceIds.size) {
+    throw new Error("PREDICTION_RACES_INCOMPLETE");
+  }
   return root as { strategy: Strategy; predictions: Record<string, unknown>[] };
+}
+
+export function completeMissingPredictions(
+  value: unknown,
+  strategy: Strategy,
+  validRaceIds: Set<string>,
+): unknown {
+  if (!value || typeof value !== "object") return value;
+  const root = value as Record<string, unknown>;
+  if (root.strategy !== strategy || !Array.isArray(root.predictions)) {
+    return value;
+  }
+  const present = new Set(
+    (root.predictions as Record<string, unknown>[]).map((item) =>
+      String(item.race_id ?? "")
+    ),
+  );
+  return {
+    ...root,
+    predictions: [
+      ...root.predictions,
+      ...[...validRaceIds].filter((raceId) => !present.has(raceId)).map(
+        (raceId) => ({
+          race_id: raceId,
+          action: "SKIP",
+          confidence: 0,
+          reason: "AI応答に提案がなかったため安全側で見送り",
+          bets: [],
+        }),
+      ),
+    ],
+  };
 }
 
 export const SELECTION_SCHEMA = {
   type: "object",
   properties: Object.fromEntries(STRATEGIES.map((strategy) => [strategy, {
     type: "array",
-    maxItems: 3,
+    maxItems: 5,
     items: {
       type: "object",
       properties: {

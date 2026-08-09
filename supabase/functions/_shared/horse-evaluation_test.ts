@@ -93,6 +93,9 @@ Deno.test("feature engineering exposes suitability, trend, and workload", () => 
       margin: 0.5,
       jockey: "騎手A",
       weightCarried: 55,
+      finishTime: "1:34.0",
+      cornerPositions: [4, 3],
+      raceClass: "2win",
     },
     {
       raceDate: "2026-06-20",
@@ -126,6 +129,12 @@ Deno.test("feature engineering exposes suitability, trend, and workload", () => 
   assert(features.jockeyPartnership > 80, "jockey partnership");
   assert(features.weightCarriedChange === 1, "weight carried change");
   assert(features.layoffDays === 14, "layoff days");
+  assert(features.averageSpeed != null, "average speed observation");
+  assert(
+    features.averageFinalCornerRatio != null,
+    "corner-position observation",
+  );
+  assert(features.averageClassLevel === 4, "class-level observation");
 });
 
 Deno.test("evaluation includes neutral features when history is missing", () => {
@@ -133,4 +142,10 @@ Deno.test("evaluation includes neutral features when history is missing", () => 
   assert(result.features.recentForm === 50, "neutral recent form");
   assert(result.features.weightCarriedChange === null, "unknown workload");
   assert(result.features.layoffDays === null, "unknown layoff");
+  assert(result.features.averageSpeed === null, "unknown speed");
+  assert(
+    result.features.averageFinalCornerRatio === null,
+    "unknown corner position",
+  );
+  assert(result.features.averageClassLevel === null, "unknown class");
 });
