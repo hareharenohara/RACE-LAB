@@ -2,3 +2,9 @@ project_id = "lgpvvwymvqzhoqkpuyjv"
 
 [functions.jra-weekend-daily]
 verify_jwt = false
+
+[functions.jra-prediction-worker]
+verify_jwt = false
+
+[functions.jra-results-live]
+verify_jwt = false

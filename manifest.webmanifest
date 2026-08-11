@@ -1,7 +1,7 @@
 {
-  "name": "RACE LAB — AI競馬予測監査",
+  "name": "RACE LAB — Gemini競馬ペーパー運用",
   "short_name": "RACE LAB",
-  "description": "AI競馬予測とプログラムの購入判断を検証するプライベート分析アプリ",
+  "description": "外部情報と直前オッズを使ったGemini競馬予測を検証するペーパートレードアプリ",
   "lang": "ja",
   "id": "/",
   "start_url": "/",

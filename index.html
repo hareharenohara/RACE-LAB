@@ -14,6 +14,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./ui.css">
+  <style>.pipeline-summary{margin:0 0 22px}.pipeline-panel{padding:22px}.pipeline-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px}.pipeline-steps>div{display:grid;grid-template-columns:1fr auto;gap:3px;background:#f3f6f2;border-radius:10px;padding:14px}.pipeline-steps small{grid-column:1/-1;color:var(--green);font-weight:900}.pipeline-steps b{font-size:12px}.pipeline-steps strong{font:700 26px Georgia;color:var(--green)}.pipeline-steps span{grid-column:2;font-size:10px;color:var(--muted)}.source-strip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:13px}.source-strip span{background:#e5eee9;color:#285844;border-radius:999px;padding:5px 9px;font-size:10px}.rollover-row{display:grid;grid-template-columns:1fr auto;gap:3px;border-top:1px solid var(--line);margin-top:18px;padding-top:14px}.rollover-row strong{color:var(--green)}.rollover-row small{grid-column:1/-1;color:var(--muted)}.prediction-meta{display:flex;gap:7px;margin:12px 0}.prediction-meta span,.rollover-plan,.caveat{display:inline-flex;background:#edf3ef;color:#315b49;border-radius:7px;padding:6px 9px;font-size:10px}.rollover-plan{display:flex;gap:8px;margin:9px 0}.caveat{margin:3px;color:#87590e;background:#fff0c9}.selection-answer>small{grid-column:2/-1;color:var(--muted)}@media(max-width:720px){.pipeline-steps{grid-template-columns:1fr 1fr}}</style>
 </head>
 <body>
   <div id="auth" class="auth-layer">
@@ -30,30 +31,31 @@
     <div class="brand"><span>R</span><div>RACE LAB<small>DECISION INTELLIGENCE</small></div></div>
     <nav>
       <button class="active" data-page="dashboard">概要</button>
-      <button data-page="today">予想・購入</button>
-      <button data-page="trace">AI判断フロー</button>
+      <button data-page="today">予想・運用</button>
+      <button data-page="trace">AI判断ログ</button>
       <button data-page="analytics">成績分析</button>
       <button data-page="operations">実行履歴</button>
     </nav>
-    <div class="sidebar-foot"><i></i> 自動運用中<small>予想 毎日07:00・結果 10分間隔</small><button id="logout">ログアウト</button></div>
+    <div class="sidebar-foot"><i></i> ペーパー運用中<small>候補抽出 07:00・直前更新 T-20・結果 3分間隔</small><button id="logout">ログアウト</button></div>
   </aside>
   <main>
-    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">概要</h1></div><div class="header-actions"><button id="pwa-install" class="install-button" hidden>アプリをインストール</button><div class="header-meta"><span>AI + RULE ENGINE</span><b id="last-run">データ読込中</b></div></div></header>
+    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">概要</h1></div><div class="header-actions"><button id="refresh-data" class="install-button">更新</button><button id="pwa-install" class="install-button" hidden>アプリをインストール</button><div class="header-meta"><span>GEMINI ADAPTIVE V2</span><b id="last-run">データ読込中</b></div></div></header>
     <div id="pwa-update" class="update-toast" hidden><span>新しいバージョンを利用できます</span><button>今すぐ更新</button></div>
     <div id="error" class="error" hidden></div>
     <section id="dashboard" class="page active">
-      <div class="hero"><div><p>単一AI 累計損益</p><strong id="total-profit">—</strong><small>開始資金 ¥100,000・1日上限 ¥10,000</small></div><div class="flow-mini"><span>DATA</span><b>→</b><span>AI ANALYSIS</span><b>→</b><span>VERIFY</span><b>→</b><span>BET / SKIP</span></div></div>
+      <div class="hero"><div><p>Gemini ペーパートレード累計損益</p><strong id="total-profit">—</strong><small>開始資金 ¥100,000・実馬券購入なし・AIが買い目と資金を判断</small></div><div class="flow-mini"><span>STAGE 1</span><b>→</b><span>外部情報</span><b>→</b><span>GEMINI選定</span><b>→</b><span>T-20 最終判断</span></div></div>
       <div class="strategy-grid" id="strategy-cards"></div>
+      <div class="pipeline-summary" id="pipeline-summary"></div>
       <div class="two-col"><article class="panel"><div class="panel-title"><h2>AI運用資金</h2><span>現在残高</span></div><div id="balance-bars"></div></article><article class="panel"><div class="panel-title"><h2>最新バッチ</h2><span class="ok">監視中</span></div><div id="job-list"></div></article></div>
     </section>
     <section id="today" class="page"><div class="tabs" id="strategy-tabs"></div><div id="race-list"></div></section>
     <section id="trace" class="page">
-      <div class="trace-head"><div><p class="eyebrow">END-TO-END TRACE</p><h2>AIに渡したデータから最終判断まで</h2><p>一次分析・統合・詳細分析・買い目提案・最終判断を確認できます。</p></div><div class="filters"><select id="trace-purpose"><option value="all">全AI処理</option><option value="prediction">買い目提案</option><option value="screening">分析</option><option value="audit">最終判断</option></select><select id="trace-strategy"><option value="all">単一AI</option><option value="single">単一AI</option></select></div></div>
+      <div class="trace-head"><div><p class="eyebrow">END-TO-END TRACE</p><h2>収集データからGeminiの最終判断まで</h2><p>機械判定は技術的な有効性だけを確認し、買う・見送る・資金配分はGeminiの判断を尊重します。</p></div><div class="filters"><select id="trace-purpose"><option value="all">全AI処理</option><option value="screening">レース選定</option><option value="prediction">最終予想</option><option value="correction">出力訂正</option><option value="audit">監査</option></select><select id="trace-strategy"><option value="all">単一AI</option><option value="single">単一AI</option></select></div></div>
       <div class="trace-layout"><aside class="call-list" id="call-list"></aside><article class="trace-detail panel" id="trace-detail"><div class="empty-state"><b>AI処理を選択</b><span>左の履歴から確認したい処理を選んでください。</span></div></article></div>
     </section>
     <section id="analytics" class="page"><div class="metrics" id="analysis-metrics"></div><article class="panel"><div class="panel-title"><h2>単一AIパフォーマンス</h2><span>確定済み馬券・全期間</span></div><div class="table-wrap"><table><thead><tr><th>AI</th><th>購入額</th><th>払戻</th><th>損益</th><th>回収率</th><th>予測的中率</th><th>実的中率</th><th>確率誤差</th><th>Brier</th></tr></thead><tbody id="analysis-table"></tbody></table></div></article></section>
     <section id="operations" class="page"><article class="panel"><div class="panel-title"><h2>バッチ実行履歴</h2><span>収集・予測・結果反映</span></div><div id="audit-list"></div></article></section>
   </main>
-  <script src="./analytics-core.js"></script><script src="./app.js"></script>
+  <script src="./analytics-core.js"></script><script src="./app.js"></script><script>document.getElementById("refresh-data").addEventListener("click",load)</script>
 </body>
 </html>

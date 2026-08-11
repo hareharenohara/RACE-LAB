@@ -23,11 +23,13 @@ select cron.schedule(
   $job$
 );
 
--- Near-real-time result settlement every 10 minutes from 09:00 to 21:50 JST.
+-- Near-real-time result settlement every 3 minutes from 09:00 to 21:59 JST.
 -- The function only fetches races that have started and are not yet finalized.
+select cron.unschedule(jobid) from cron.job
+where jobname = 'jra-results-live-10min';
 select cron.schedule(
-  'jra-results-live-10min',
-  '*/10 0-12 * * *',
+  'jra-results-live-3min',
+  '*/3 0-12 * * *',
   $job$
   select net.http_post(
     url := 'https://lgpvvwymvqzhoqkpuyjv.supabase.co/functions/v1/jra-results-live',

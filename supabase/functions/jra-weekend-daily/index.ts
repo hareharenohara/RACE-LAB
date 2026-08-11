@@ -149,6 +149,7 @@ Deno.serve(async (req) => {
     body = await req.json().catch(() => ({})) as {
       target_date?: string;
       force?: boolean;
+      integration_test?: boolean;
     },
     date = body.target_date ??
       new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(
@@ -222,18 +223,18 @@ Deno.serve(async (req) => {
       api_requests: 1,
       metadata: {
         provider: "jra_netkeiba",
-        pipeline_version: "single-v1",
-        pipeline_stage: "analysis",
+        pipeline_version: "adaptive-v2",
+        pipeline_stage: "stage1",
         pipeline_attempts: {},
         analysis_offset: 0,
-        analysis_chunk_size: 4,
         race_queue: raceQueue,
-        analysis: { races: [] },
+        selection_due_at: `${date}T09:00:00+09:00`,
+        integration_test: body.integration_test === true,
       },
     }).eq("id", batch.id);
     return json({
       status: "queued",
-      stage: "analysis",
+      stage: "stage1",
       races: raceQueue.length,
       batchRunId: batch.id,
     }, 202);

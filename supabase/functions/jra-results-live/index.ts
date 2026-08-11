@@ -176,28 +176,29 @@ Deno.serve(async (req) => {
           key(bet.bet_type as BetType, (bet.combination ?? []).map(Number)),
         ) ?? 0;
         const returnAmount = Math.round(Number(bet.stake) / 100 * payout);
-        const { error: settlementError } = await db.from("settlements").insert({
-          bet_id: bet.id,
-          stake: bet.stake,
-          return_amount: returnAmount,
-          is_hit: returnAmount > 0,
+        const { error: settlementError } = await db.rpc("settle_paper_bet", {
+          p_bet_id: bet.id,
+          p_return_amount: returnAmount,
         });
         if (settlementError) throw settlementError;
-        const { data: account, error: accountError } = await db.from(
-          "strategy_accounts",
-        ).select("*").eq("strategy", bet.strategy).single();
-        if (accountError) throw accountError;
-        const balance = Number(account.current_balance) - Number(bet.stake) +
-          returnAmount;
-        const { error: updateError } = await db.from("strategy_accounts")
-          .update({
-            current_balance: balance,
-            total_staked: Number(account.total_staked) + Number(bet.stake),
-            total_returned: Number(account.total_returned) + returnAmount,
-            minimum_balance: Math.min(Number(account.minimum_balance), balance),
-            updated_at: new Date().toISOString(),
-          }).eq("strategy", bet.strategy);
-        if (updateError) throw updateError;
+        // Rollover is advisory context for Gemini's next allocation, not an
+        // automatically enforced stake. A place loss ends the current chain.
+        if (bet.strategy === "single" && bet.bet_type === "place") {
+          const { data: current } = await db.from("rollover_states").select(
+            "consecutive_hits",
+          ).eq("strategy", "single").single();
+          const { error: rolloverError } = await db.from("rollover_states")
+            .upsert({
+              strategy: "single",
+              pending_amount: returnAmount > 0 ? returnAmount : 0,
+              source_bet_id: returnAmount > 0 ? bet.id : null,
+              consecutive_hits: returnAmount > 0
+                ? Number(current?.consecutive_hits ?? 0) + 1
+                : 0,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: "strategy" });
+          if (rolloverError) throw rolloverError;
+        }
         settledBets++;
       }
       await db.from("races").update({
