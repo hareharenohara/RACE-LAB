@@ -87,7 +87,7 @@ function renderDashboardTimeline(items,todayPreds,batch){
  const counts=s=>items.filter(x=>s.includes(x.state)).length,selectionDue=batch?.metadata?.selection_due_at,now=Date.now();
  const byRace=new Map(todayPreds.map(p=>[p.races?.id,p])),focus=items.filter(x=>["selected","final_refresh_pending","final_decided","completed","invalid_output"].includes(x.state)||byRace.has(x.races?.id));
  todayPreds.forEach(p=>{if(!focus.some(x=>x.races?.id===p.races?.id))focus.push({state:"completed",next_action_at:null,races:p.races})});
- const colors=["#2878c8","#a15b22","#7b55b5","#20876b","#c24e67","#65752b"],events=[
+ const trackColors={"札幌":"#0060A8","函館":"#007A5E","福島":"#C83B00","中山":"#004D40","東京":"#2B7030","新潟":"#B25900","中京":"#8D6200","京都":"#4C6B1F","阪神":"#1565C0","小倉":"#8E1515"},events=[
   {at:new Date().setHours(7,0,0,0),label:"開催情報を取得",sub:items.length?`${items.length}レースを登録`:"開催情報を確認",system:true,done:!!items.length},
   {at:selectionDue?Date.parse(selectionDue):new Date().setHours(9,0,0,0),label:"候補レースを選定",sub:counts(["evidence_pending"])?`${counts(["evidence_pending"])}レースの情報を収集中`:"Geminiの選定処理",system:true,done:items.length&&!counts(["stage1_pending","evidence_pending","evidence_ready"])}
  ];
@@ -95,7 +95,7 @@ function renderDashboardTimeline(items,todayPreds,batch){
   const p=byRace.get(item.races?.id),r=p?.races||item.races;if(!r)return;
   const bets=p?.bets||[],stake=bets.reduce((n,b)=>n+Number(b.stake),0),settlements=bets.map(b=>b.settlements?.[0]).filter(Boolean),settled=bets.length&&settlements.length===bets.length,returned=settlements.reduce((n,s)=>n+Number(s.return_amount||0),0),hit=settled&&settlements.some(s=>s.is_hit),call=p?aiCalls.find(c=>c.id===p.ai_call_id):null;
   const decisionAt=Date.parse(call?.requested_at||p?.predicted_at||item.next_action_at||new Date(Date.parse(r.start_time)-20*60000)),purchaseAt=Date.parse(p?.predicted_at||item.next_action_at||new Date(Date.parse(r.start_time)-20*60000)),result=Array.isArray(r.race_results)?r.race_results[0]:r.race_results,resultAt=Date.parse(settlements.map(s=>s.settled_at).filter(Boolean).sort().at(-1)||result?.confirmed_at||new Date(Date.parse(r.start_time)+10*60000));
-  const color=colors[[...String(r.id)].reduce((n,c)=>n+c.charCodeAt(0),0)%colors.length],race=`${r.track} ${r.race_number}R`,reason=item.selection_reason||selections.find(s=>s.race_id===r.id)?.reason||"選定理由の記録なし",tickets=bets.map(b=>`${betLabels[b.bet_type]||b.bet_type} ${(b.combination||[]).join("-")}`).join(" / ");
+  const color=trackColors[r.track]||"#5F6D65",race=`${r.track} ${r.race_number}R`,reason=item.selection_reason||selections.find(s=>s.race_id===r.id)?.reason||"選定理由の記録なし",tickets=bets.map(b=>`${betLabels[b.bet_type]||b.bet_type} ${(b.combination||[]).join("-")}`).join(" / ");
   events.push(
    {at:decisionAt,race,raceId:r.id,name:r.race_name,color,label:p?"最終判断完了":"最終判断を開始",sub:p?`${bets.length?"購入":"見送り"}・信頼度 ${Number(p.confidence||0)}%`:`発走20分前・${reason}`,done:!!p,active:!p&&decisionAt<=now,call:p?.ai_call_id},
    {at:purchaseAt,race,raceId:r.id,name:r.race_name,color,label:bets.length?`馬券を購入 ${yen(stake)}`:p?"購入見送り":"購入判断",sub:bets.length?tickets:p?"AI判断により購入なし":"最終判断直後に実行",done:!!p,call:p?.ai_call_id},
