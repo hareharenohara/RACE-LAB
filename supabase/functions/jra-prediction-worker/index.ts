@@ -22,6 +22,7 @@ import {
   verifySourceIdentities,
 } from "../_shared/source-evidence.ts";
 import type { RaceSummary } from "../_shared/types.ts";
+import { resolveFinalMarkets } from "../_shared/finalization.ts";
 
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), {
@@ -396,6 +397,23 @@ async function selectRaces(db: any, batch: any) {
 }
 
 async function finalDecision(db: any, batch: any, item: any) {
+  const { data: priorPrediction, error: priorError } = await db.from(
+    "predictions",
+  ).select("id,action,bets(id)").eq("batch_run_id", batch.id).eq(
+    "strategy",
+    "single",
+  ).eq("race_id", item.race_id).maybeSingle();
+  if (priorError) throw priorError;
+  if (priorPrediction) {
+    const complete = priorPrediction.action === "skip" ||
+      priorPrediction.bets?.length > 0;
+    await db.from("race_pipeline_items").update({
+      state: complete ? "completed" : "failed",
+      last_error: complete ? null : "INCOMPLETE_PREDICTION_EXISTS",
+      updated_at: nowIso(),
+    }).eq("id", item.id);
+    return;
+  }
   const { data: race } = await db.from("races").select("*").eq(
     "id",
     item.race_id,
@@ -514,68 +532,35 @@ async function finalDecision(db: any, batch: any, item: any) {
     }).eq("id", item.id);
     return;
   }
-  const { data: prediction, error: predictionError } = await db.from(
-    "predictions",
-  ).insert({
-    batch_run_id: batch.id,
-    race_id: race.id,
-    strategy: "single",
-    ai_call_id: call.callId,
-    action: decision.action === "BET" ? "bet" : "skip",
-    confidence: decision.confidence,
-    reason: decision.reason,
-    input_hash: call.inputHash,
-    prediction_hash: await hash(decision),
-    predicted_at: nowIso(),
-    raw_response: decision,
-  }).select("id").single();
-  if (predictionError) throw predictionError;
-  for (const bet of decision.bets) {
-    const market = odds.find((x: any) =>
-      x.type === bet.bet_type &&
-      JSON.stringify([...x.horses].sort()) ===
-        JSON.stringify([...bet.horses].sort())
-    );
-    if (!market) {
-      throw new Error(`MARKET_ODDS_NOT_FOUND:${bet.bet_type}:${bet.horses}`);
-    }
-    const { data: snapshot, error: snapshotError } = await db.from(
-      "market_odds_snapshots",
-    ).insert({
-      batch_run_id: batch.id,
-      race_id: race.id,
-      bet_type: bet.bet_type,
-      combination: bet.horses,
-      odds_low: market.odds,
-      odds_high: market.oddsMax ?? null,
-      source_name: "netkeiba",
-      source_url: race.source_url,
-      captured_at: input.captured_at,
-      content_hash: await hash(market),
-    }).select("id").single();
-    if (snapshotError) throw snapshotError;
-    const { error: betError } = await db.rpc("create_reserved_paper_bet", {
-      p_prediction_id: prediction.id,
+  const matched = resolveFinalMarkets(decision.bets, odds);
+  const atomicBets = await Promise.all(matched.map(async ({ bet, market }) => ({
+    ...bet,
+    odds: market.odds,
+    odds_max: market.oddsMax ?? null,
+    source_url: race.source_url,
+    captured_at: input.captured_at,
+    content_hash: await hash(market),
+  })));
+  const predictedAt = nowIso();
+  const { error: finalizeError } = await db.rpc(
+    "finalize_prediction_decision",
+    {
+      p_pipeline_item_id: item.id,
+      p_batch_run_id: batch.id,
       p_race_id: race.id,
       p_strategy: "single",
-      p_bet_type: bet.bet_type,
-      p_combination: bet.horses,
-      p_stake: bet.stake,
-      p_market_snapshot_id: snapshot.id,
-      p_odds_at_prediction: market.odds,
-      p_raw_estimated_probability: null,
-      p_estimated_probability: null,
-      p_expected_value: null,
-      p_reason: bet.reason,
-      p_stake_reason: bet.stake_reason,
-    });
-    if (betError) throw betError;
-  }
-  await db.from("race_pipeline_items").update({
-    state: "completed",
-    final_attempts: item.final_attempts + 1,
-    updated_at: nowIso(),
-  }).eq("id", item.id);
+      p_ai_call_id: call.callId,
+      p_action: decision.action === "BET" ? "bet" : "skip",
+      p_confidence: decision.confidence,
+      p_reason: decision.reason,
+      p_input_hash: call.inputHash,
+      p_prediction_hash: await hash(decision),
+      p_predicted_at: predictedAt,
+      p_raw_response: decision,
+      p_bets: atomicBets,
+    },
+  );
+  if (finalizeError) throw finalizeError;
 }
 
 Deno.serve(async (req) => {
