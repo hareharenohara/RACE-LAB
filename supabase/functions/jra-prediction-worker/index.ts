@@ -574,6 +574,22 @@ Deno.serve(async (req) => {
   const url = Deno.env.get("SUPABASE_URL"), key = serviceKey();
   if (!url || !key) return json({ error: "ENV" }, 500);
   const db = createClient(url, key, { auth: { persistSession: false } });
+  const { data: expiredSelections, error: expiredSelectionError } = await db
+    .from("race_pipeline_items").select("id,races!inner(start_time)")
+    .eq("state", "selected").lt("races.start_time", nowIso());
+  if (expiredSelectionError) {
+    return json({ error: expiredSelectionError.message }, 500);
+  }
+  const expiredIds = (expiredSelections ?? []).map((item: any) => item.id);
+  if (expiredIds.length) {
+    const { error: expireError } = await db.from("race_pipeline_items").update({
+      state: "not_selected",
+      next_action_at: null,
+      last_error: "Final decision window expired before worker execution",
+      updated_at: nowIso(),
+    }).in("id", expiredIds);
+    if (expireError) return json({ error: expireError.message }, 500);
+  }
   const { data: batches, error } = await db.from("batch_runs").select(
     "id,target_date,status,metadata",
   ).eq("status", "running").order("started_at").limit(10);
