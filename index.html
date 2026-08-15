@@ -43,10 +43,20 @@
     <div id="pwa-update" class="update-toast" hidden><span>新しいバージョンを利用できます</span><button>今すぐ更新</button></div>
     <div id="error" class="error" hidden></div>
     <section id="dashboard" class="page active">
-      <div class="hero"><div><p>Gemini ペーパートレード累計損益</p><strong id="total-profit">—</strong><small>開始資金 ¥100,000・実馬券購入なし・AIが買い目と資金を判断</small></div><div class="flow-mini"><span>STAGE 1</span><b>→</b><span>外部情報</span><b>→</b><span>GEMINI選定</span><b>→</b><span>T-20 最終判断</span></div></div>
-      <div class="strategy-grid" id="strategy-cards"></div>
-      <div class="pipeline-summary" id="pipeline-summary"></div>
-      <div class="two-col"><article class="panel"><div class="panel-title"><h2>AI運用資金</h2><span>現在残高</span></div><div id="balance-bars"></div></article><article class="panel"><div class="panel-title"><h2>最新バッチ</h2><span class="ok">監視中</span></div><div id="job-list"></div></article></div>
+      <div id="dashboard-command"></div>
+      <div class="dashboard-grid">
+        <div class="dashboard-main">
+          <div id="dashboard-timeline"></div>
+          <section class="dashboard-section"><div class="section-heading"><div><p class="eyebrow">MY RACES</p><h2>購入したレース</h2></div><span id="purchased-count" class="section-count"></span></div><div id="dashboard-races" class="dashboard-races"></div></section>
+        </div>
+        <aside class="dashboard-side">
+          <div id="dashboard-next-races"></div>
+          <div id="dashboard-alerts"></div>
+          <article class="panel compact-panel"><div class="panel-title"><h2>本日の収支</h2><span>ペーパー運用</span></div><div id="dashboard-money"></div></article>
+        </aside>
+      </div>
+      <details class="legacy-dashboard"><summary>残高・バッチ詳細</summary><div class="strategy-grid" id="strategy-cards"></div><div class="pipeline-summary" id="pipeline-summary"></div><div class="two-col"><article class="panel"><div class="panel-title"><h2>AI運用資金</h2><span>現在残高</span></div><div id="balance-bars"></div></article><article class="panel"><div class="panel-title"><h2>最新バッチ</h2><span class="ok">監視中</span></div><div id="job-list"></div></article></div></details>
+      <strong id="total-profit" hidden>—</strong>
     </section>
     <section id="today" class="page"><div class="tabs" id="strategy-tabs"></div><div id="race-list"></div></section>
     <section id="trace" class="page">
