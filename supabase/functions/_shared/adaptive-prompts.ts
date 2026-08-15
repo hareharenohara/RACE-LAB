@@ -43,6 +43,21 @@ export const FINAL_DECISION_SCHEMA = {
     action: { type: "string", enum: ["BET", "SKIP"] },
     confidence: { type: "integer", minimum: 0, maximum: 100 },
     reason: { type: "string" },
+    predicted_top3: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: "object",
+        properties: {
+          rank: { type: "integer", minimum: 1, maximum: 3 },
+          horse_number: { type: "integer" },
+          horse_name: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["rank", "horse_number", "horse_name", "reason"],
+      },
+    },
     data_caveats: { type: "array", items: { type: "string" } },
     rollover_plan: { type: "string" },
     bets: {
@@ -70,6 +85,7 @@ export const FINAL_DECISION_SCHEMA = {
     "action",
     "confidence",
     "reason",
+    "predicted_top3",
     "data_caveats",
     "rollover_plan",
     "bets",
@@ -91,7 +107,7 @@ export function buildFinalDecisionPrompt(
       correction.join("; ")
     }`
     : "";
-  return `${COMMON}\nこれは発走直前の最終判断です。BETなら券種・馬番・各金額を自由に決めてください。複勝ころがしは選択肢の一つで、単勝・ワイドも同時に検討してください。ころがし全額固定ではなく、残高、前回払戻、確信度、オッズ、当日残り候補を踏まえて金額を説明してください。SKIPはデータ不足や魅力なしと判断した場合だけ選べます。${correctionText}\nINPUT_JSON=${
+  return `${COMMON}\nこれは発走直前の最終判断です。全出走馬を比較し、予想1着・2着・3着をpredicted_top3に順位どおり3頭出してください。BETなら券種・馬番・各金額を自由に決めてください。複勝ころがしは選択肢の一つで、単勝・ワイドも同時に検討してください。ころがし全額固定ではなく、残高、前回払戻、確信度、オッズ、当日残り候補を踏まえて金額を説明してください。SKIPはデータ不足や魅力なしと判断した場合だけ選べます。${correctionText}\nINPUT_JSON=${
     JSON.stringify(input)
   }`;
 }
@@ -113,6 +129,18 @@ export function validateFinalDecision(
   }
   if (!context.saleOpen && value?.action === "BET") errors.push("発売時間外");
   if (!Array.isArray(value?.bets)) errors.push("betsが配列ではない");
+  const top3 = Array.isArray(value?.predicted_top3)
+    ? value.predicted_top3
+    : [];
+  const ranks = top3.map((x: any) => Number(x?.rank));
+  const predictedHorses = top3.map((x: any) => Number(x?.horse_number));
+  if (
+    top3.length !== 3 || [...ranks].sort().join(",") !== "1,2,3" ||
+    new Set(predictedHorses).size !== 3
+  ) errors.push("1着から3着の予想が不正");
+  if (predictedHorses.some((x: number) => !context.horseNumbers.includes(x))) {
+    errors.push("着順予想に存在しない馬番を含む");
+  }
   const bets = Array.isArray(value?.bets) ? value.bets : [];
   if (value?.action === "BET" && bets.length === 0) {
     errors.push("BETなのに買い目がない");

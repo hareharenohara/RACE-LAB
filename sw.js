@@ -1,4 +1,4 @@
-const CACHE_NAME = "race-lab-shell-v3";
+const CACHE_NAME = "race-lab-shell-v5";
 const SHELL = [
   "/index.html", "/styles.css", "/ui.css", "/analytics-core.js", "/app.js",
   "/manifest.webmanifest", "/icons/icon.svg", "/icons/icon-192.png",
@@ -18,6 +18,28 @@ self.addEventListener("activate", event => {
 
 self.addEventListener("message", event => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+});
+
+self.addEventListener("push", event => {
+  const data = event.data?.json() ?? {};
+  event.waitUntil(self.registration.showNotification(data.title || "RACE LAB 的中", {
+    body: data.body || "的中結果が確定しました",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    tag: data.tag || "race-lab-hit",
+    renotify: false,
+    data: { url: data.url || "/" }
+  }));
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(windows => {
+    const target = new URL(event.notification.data?.url || "/", self.location.origin).href;
+    const existing = windows[0];
+    if (existing) return existing.navigate(target).then(client => client.focus());
+    return clients.openWindow(target);
+  }));
 });
 
 self.addEventListener("fetch", event => {

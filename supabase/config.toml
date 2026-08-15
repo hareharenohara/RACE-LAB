@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.jra-results-live]
 verify_jwt = false
+
+[functions.push-config]
+verify_jwt = false

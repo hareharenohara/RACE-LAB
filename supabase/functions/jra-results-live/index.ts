@@ -1,5 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2.110.8";
 import * as cheerio from "npm:cheerio@1.0.0";
+import webpush from "npm:web-push@3.6.7";
 import { optimizeEvaluationWeights } from "../_shared/weight-optimizer.ts";
 import { fitCalibration } from "../_shared/probability-calibrator.ts";
 
@@ -85,6 +86,58 @@ function parseResult(html: string) {
   return { finishOrder: finishOrder.filter(Number.isFinite), payouts };
 }
 
+const yen = (value: number) => `¥${Math.round(value).toLocaleString("ja-JP")}`;
+
+async function sendHitNotifications(
+  // The project intentionally uses the dynamic Supabase schema client here;
+  // generated database types are not checked into this repository.
+  db: any,
+  race: { id: string; track: string; race_number: number; race_name?: string },
+  stake: number,
+  returned: number,
+) {
+  const publicKey = Deno.env.get("VAPID_PUBLIC_KEY");
+  const privateKey = Deno.env.get("VAPID_PRIVATE_KEY");
+  const subject = Deno.env.get("VAPID_SUBJECT");
+  if (!publicKey || !privateKey || !subject) {
+    console.warn("push notification skipped: VAPID secrets are not configured");
+    return 0;
+  }
+  webpush.setVapidDetails(subject, publicKey, privateKey);
+  const { data: subscriptions, error } = await db.from("push_subscriptions")
+    .select("id,endpoint,p256dh,auth");
+  if (error) throw error;
+  let sent = 0;
+  for (const subscription of subscriptions ?? []) {
+    const { error: claimError } = await db.from("push_notification_deliveries")
+      .insert({ subscription_id: subscription.id, race_id: race.id });
+    if (claimError?.code === "23505") continue;
+    if (claimError) throw claimError;
+    try {
+      const profit = returned - stake;
+      await webpush.sendNotification({
+        endpoint: subscription.endpoint,
+        keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+      }, JSON.stringify({
+        title: `${race.track} ${race.race_number}R 的中`,
+        body: `${race.race_name ? `${race.race_name}・` : ""}購入 ${yen(stake)}・払戻 ${yen(returned)}・収支 ${profit >= 0 ? "+" : ""}${yen(profit)}`,
+        tag: `race-hit-${race.id}`,
+        url: `/?race=${encodeURIComponent(race.id)}`,
+      }));
+      sent++;
+    } catch (pushError) {
+      const statusCode = Number((pushError as { statusCode?: number }).statusCode);
+      if (statusCode === 404 || statusCode === 410) {
+        await db.from("push_subscriptions").delete().eq("id", subscription.id);
+      }
+      await db.from("push_notification_deliveries").delete()
+        .eq("subscription_id", subscription.id).eq("race_id", race.id);
+      console.error("push notification failed", subscription.id, pushError);
+    }
+  }
+  return sent;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "GET") return json({ status: "ok" });
   if (req.method !== "POST") return json({ error: "METHOD" }, 405);
@@ -107,7 +160,7 @@ Deno.serve(async (req) => {
   const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
     .slice(0, 10);
   const { data: races, error } = await db.from("races").select(
-    "id,external_id,track,race_number,start_time,status",
+    "id,external_id,track,race_number,race_name,start_time,status",
   ).like("external_id", "jra:%").gte("race_date", since).lt(
     "start_time",
     cutoff,
@@ -168,10 +221,15 @@ Deno.serve(async (req) => {
         parsed.payouts.map((x) => [key(x.type, x.horses), x.payout]),
       );
       const { data: bets } = await db.from("bets").select(
-        "id,strategy,bet_type,combination,stake,settlements(id)",
+        "id,strategy,bet_type,combination,stake,settlements(id,return_amount)",
       ).eq("race_id", race.id);
+      let raceStake = 0, raceReturn = 0;
       for (const bet of bets ?? []) {
-        if (bet.settlements?.length) continue;
+        raceStake += Number(bet.stake);
+        if (bet.settlements?.length) {
+          raceReturn += Number(bet.settlements[0].return_amount ?? 0);
+          continue;
+        }
         const payout = payoutMap.get(
           key(bet.bet_type as BetType, (bet.combination ?? []).map(Number)),
         ) ?? 0;
@@ -181,6 +239,7 @@ Deno.serve(async (req) => {
           p_return_amount: returnAmount,
         });
         if (settlementError) throw settlementError;
+        raceReturn += returnAmount;
         // Rollover is advisory context for Gemini's next allocation, not an
         // automatically enforced stake. A place loss ends the current chain.
         if (bet.strategy === "single" && bet.bet_type === "place") {
@@ -205,6 +264,13 @@ Deno.serve(async (req) => {
         status: "finished",
         updated_at: new Date().toISOString(),
       }).eq("id", race.id);
+      if (raceReturn > 0) {
+        try {
+          await sendHitNotifications(db, race, raceStake, raceReturn);
+        } catch (notificationError) {
+          console.error("hit notification processing failed", race.id, notificationError);
+        }
+      }
       settledRaces++;
     } catch (error) {
       console.error("result settlement failed", race.external_id, error);
