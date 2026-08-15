@@ -619,7 +619,21 @@ Deno.serve(async (req) => {
         .eq("state", "selected").lte("next_action_at", nowIso()).order(
           "next_action_at",
         ).limit(1).maybeSingle();
-      if (selected) await finalDecision(db, batch, selected);
+      if (selected) {
+        try {
+          await finalDecision(db, batch, selected);
+        } catch (error) {
+          const message = String(error);
+          const { error: itemError } = await db.from("race_pipeline_items")
+            .update({
+              state: "failed",
+              final_attempts: selected.final_attempts + 1,
+              last_error: message,
+              updated_at: nowIso(),
+            }).eq("id", selected.id);
+          if (itemError) throw itemError;
+        }
+      }
       const { count } = await db.from("race_pipeline_items").select("id", {
         count: "exact",
         head: true,
@@ -637,6 +651,7 @@ Deno.serve(async (req) => {
     await db.from("batch_runs").update({
       metadata,
       status: complete ? "succeeded" : "running",
+      error_message: null,
       finished_at: complete ? nowIso() : null,
     }).eq("id", batch.id);
     await db.rpc("release_prediction_worker_lease", {
