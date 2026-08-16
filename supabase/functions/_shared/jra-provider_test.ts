@@ -1,4 +1,9 @@
-import { inferRaceClass, parsePastRunsHtml } from "./jra-provider.ts";
+import {
+  inferRaceClass,
+  parsePastRunsHtml,
+  parseRaceListHtml,
+  validateRaceSchedule,
+} from "./jra-provider.ts";
 
 const assertEquals = (actual: unknown, expected: unknown, message: string) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -53,4 +58,49 @@ Deno.test("unrelated and incomplete cells are ignored", () => {
     <td class="Past"></td><td class="Other" id="myhorse_2">not a run</td>
   </tr>`;
   assertEquals(parsePastRunsHtml(html), [], "invalid cells");
+});
+
+Deno.test("race list uses the time from the same race item", () => {
+  const padding = " ".repeat(2500);
+  const html = `<ul><li class="RaceList_DataItem">
+    <a href="../race/shutuba.html?race_id=202604020801">1R</a>${padding}
+    <span class="ItemTitle">2歳未勝利</span>
+    <span class="RaceList_Itemtime">09:40 </span>
+    <span class="RaceList_ItemLong Turf">芝1600m</span>
+  </li><li class="RaceList_DataItem">
+    <a href="../race/shutuba.html?race_id=202604020802">2R</a>
+    <span class="ItemTitle">3歳未勝利</span>
+    <span class="RaceList_Itemtime">10:10 </span>
+    <span class="RaceList_ItemLong Dart">ダ1200m</span>
+  </li></ul>`;
+  const races = parseRaceListHtml(html, "2026-08-16");
+  assertEquals(races.map((race) => race.startTime), [
+    "2026-08-16T09:40:00+09:00",
+    "2026-08-16T10:10:00+09:00",
+  ], "race times");
+  assertEquals(races[0].surface, "turf", "turf surface");
+  assertEquals(races[1].surface, "dirt", "dirt surface");
+});
+
+Deno.test("missing race time fails closed instead of defaulting to 09:00", () => {
+  let failed = false;
+  try {
+    parseRaceListHtml(`<li class="RaceList_DataItem"><a href="shutuba.html?race_id=202604020801">1R</a></li>`, "2026-08-16");
+  } catch (error) {
+    failed = String(error).includes("JRA_RACE_TIME_MISSING");
+  }
+  if (!failed) throw new Error("missing time was accepted");
+});
+
+Deno.test("an implausible all-identical schedule is rejected", () => {
+  let failed = false;
+  try {
+    validateRaceSchedule([
+      { externalId: "jra:1", raceDate: "2026-08-16", track: "札幌", raceNumber: 1, raceName: "A", startTime: "2026-08-16T09:00:00+09:00", sourceUrl: "a" },
+      { externalId: "jra:2", raceDate: "2026-08-16", track: "札幌", raceNumber: 2, raceName: "B", startTime: "2026-08-16T09:00:00+09:00", sourceUrl: "b" },
+    ], "2026-08-16");
+  } catch (error) {
+    failed = String(error).includes("JRA_RACE_SCHEDULE_SUSPICIOUS");
+  }
+  if (!failed) throw new Error("identical schedule was accepted");
 });

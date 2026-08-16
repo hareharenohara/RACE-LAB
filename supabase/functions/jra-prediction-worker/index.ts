@@ -583,9 +583,9 @@ Deno.serve(async (req) => {
   const expiredIds = (expiredSelections ?? []).map((item: any) => item.id);
   if (expiredIds.length) {
     const { error: expireError } = await db.from("race_pipeline_items").update({
-      state: "not_selected",
+      state: "failed",
       next_action_at: null,
-      last_error: "Final decision window expired before worker execution",
+      last_error: "FINAL_DECISION_WINDOW_EXPIRED: selected race reached its start time before final decision",
       updated_at: nowIso(),
     }).in("id", expiredIds);
     if (expireError) return json({ error: expireError.message }, 500);

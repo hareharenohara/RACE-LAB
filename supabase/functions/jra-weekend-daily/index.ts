@@ -158,14 +158,14 @@ Deno.serve(async (req) => {
   const { data: done } = await db.from("batch_runs").select("id").eq(
     "target_date",
     date,
-  ).eq("parser_version", "jra-netkeiba-v1").eq("status", "succeeded")
+  ).eq("parser_version", "jra-netkeiba-v2").eq("status", "succeeded")
     .maybeSingle();
   if (done && !body.force) {
     return json({ status: "already_completed", batchRunId: done.id });
   }
   const { data: batch, error: be } = await db.from("batch_runs").insert({
     target_date: date,
-    parser_version: "jra-netkeiba-v1",
+    parser_version: "jra-netkeiba-v2",
   }).select("id").single();
   if (be) return json({ error: be.message }, 500);
   try {
@@ -193,7 +193,7 @@ Deno.serve(async (req) => {
         distance: r.distance,
         source_url: r.sourceUrl,
         source_fetched_at: new Date().toISOString(),
-        source_hash: "jra-list-v1",
+        source_hash: "jra-list-v2",
       })
       ),
       { data: saved, error: re } = await db.from("races").upsert(rows, {

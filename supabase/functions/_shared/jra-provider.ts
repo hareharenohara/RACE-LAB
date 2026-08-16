@@ -134,42 +134,78 @@ export function parsePastRunsHtml(html: string): CollectedPastRun[] {
   return runs;
 }
 
+const validRaceTime = (value: string) => {
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return false;
+  const hour = Number(match[1]), minute = Number(match[2]);
+  return hour >= 9 && hour <= 18 && minute >= 0 && minute < 60;
+};
+
+export function validateRaceSchedule(races: RaceSummary[], date: string) {
+  const invalid = races.filter((race) =>
+    race.raceDate !== date ||
+    !Number.isFinite(Date.parse(race.startTime)) ||
+    !race.startTime.startsWith(`${date}T`) ||
+    !validRaceTime(race.startTime.slice(11, 16))
+  );
+  if (invalid.length) {
+    throw new Error(
+      `JRA_RACE_SCHEDULE_INVALID:${invalid.map((race) => race.externalId).join(",")}`,
+    );
+  }
+  const distinctTimes = new Set(races.map((race) => race.startTime));
+  if (races.length > 1 && distinctTimes.size < 2) {
+    throw new Error("JRA_RACE_SCHEDULE_SUSPICIOUS:all_start_times_identical");
+  }
+}
+
+export function parseRaceListHtml(html: string, date: string): RaceSummary[] {
+  const $ = cheerio.load(html), races: RaceSummary[] = [], seen = new Set<string>();
+  $("li.RaceList_DataItem").each((_, element) => {
+    const item = $(element),
+      href = item.find('a[href*="shutuba.html"][href*="race_id="]').first()
+        .attr("href") ?? "",
+      id = href.match(/race_id=(\d{12})/)?.[1];
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    const time = clean(item.find(".RaceList_Itemtime").first().text()),
+      courseText = clean(item.find(".RaceList_ItemLong").first().text()),
+      course = courseText.match(/(芝|ダート|ダ|障害|障)\s*(\d{3,4})m/),
+      raceNumber = Number(id.slice(-2)),
+      track = tracks[id.slice(4, 6)] ?? `JRA${id.slice(4, 6)}`,
+      raceName = clean(item.find(".ItemTitle, .RaceName").first().text()) ||
+        `${track} ${raceNumber}R`;
+    if (!validRaceTime(time)) {
+      throw new Error(`JRA_RACE_TIME_MISSING:${id}`);
+    }
+    races.push({
+      externalId: `jra:${id}`,
+      raceDate: date,
+      track,
+      raceNumber,
+      raceName,
+      raceClass: inferRaceClass(raceName),
+      startTime: `${date}T${time}:00+09:00`,
+      surface: course?.[1] === "芝"
+        ? "turf"
+        : course?.[1]?.startsWith("障")
+        ? "jump"
+        : "dirt",
+      distance: num(course?.[2]),
+      sourceUrl: `${BASE}/race/shutuba.html?race_id=${id}`,
+    });
+  });
+  validateRaceSchedule(races, date);
+  return races;
+}
+
 export class JraProvider {
   async getRaceList(date: string): Promise<RaceSummary[]> {
     const ymd = date.replaceAll("-", "");
     const html = await fetchText(
       `${BASE}/top/race_list_sub.html?kaisai_date=${ymd}`,
     );
-    const ids = [
-      ...new Set([...html.matchAll(/race_id=(\d{12})/g)].map((m) => m[1])),
-    ];
-    return ids.map((id): RaceSummary => {
-      const at = html.indexOf(`race_id=${id}`),
-        segment = html.slice(Math.max(0, at - 700), at + 1000),
-        raceNumber = Number(id.slice(-2)),
-        track = tracks[id.slice(4, 6)] ?? `JRA${id.slice(4, 6)}`;
-      const time = segment.match(/(\d{1,2}:\d{2})/)?.[1] ?? "09:00",
-        course = clean(segment).match(/(芝|ダート|障害)\s*(\d{3,4})m/),
-        names = [
-          ...segment.matchAll(
-            /<span[^>]*class="(?:ItemTitle|RaceName)"[^>]*>([\s\S]*?)<\/span>/g,
-          ),
-        ],
-        raceName = clean(names.at(-1)?.[1] ?? "") ||
-          `${track} ${raceNumber}R`;
-      return {
-        externalId: `jra:${id}`,
-        raceDate: date,
-        track,
-        raceNumber,
-        raceName,
-        raceClass: inferRaceClass(raceName),
-        startTime: `${date}T${time}:00+09:00`,
-        surface: course?.[1] === "芝" ? "turf" : "dirt",
-        distance: num(course?.[2]),
-        sourceUrl: `${BASE}/race/shutuba.html?race_id=${id}`,
-      };
-    });
+    return parseRaceListHtml(html, date);
   }
 
   async getDetail(race: RaceSummary): Promise<JraDetail> {

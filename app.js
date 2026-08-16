@@ -65,7 +65,7 @@ function legacyRenderDashboardTimeline(items,todayPreds,batch){
   {time:"07:00",label:"開催情報を取得",sub:items.length?`${items.length}レースを登録`:"開催確認",done:!!items.length},
   {time:selectionDue?clock(selectionDue):"09:00",label:"候補レースを選定",sub:counts(["evidence_pending"])?`${counts(["evidence_pending"])}レースの情報を収集中`:`Geminiの選定まで完了`,active:counts(["stage1_pending","evidence_pending","evidence_ready"])>0,done:items.length&&!counts(["stage1_pending","evidence_pending","evidence_ready"])}
  ];
- const byRace=new Map(todayPreds.map(p=>[p.races?.id,p])),focus=items.filter(x=>["selected","final_refresh_pending","final_decided","completed","invalid_output"].includes(x.state)||byRace.has(x.races?.id));
+ const byRace=new Map(todayPreds.map(p=>[p.races?.id,p])),focus=items.filter(x=>["selected","final_refresh_pending","final_decided","completed","invalid_output","failed"].includes(x.state)||byRace.has(x.races?.id));
  todayPreds.forEach(p=>{if(!focus.some(x=>x.races?.id===p.races?.id))focus.push({state:"completed",next_action_at:null,races:p.races})});
  focus.sort((a,b)=>Date.parse(a.next_action_at||byRace.get(a.races?.id)?.predicted_at||a.races.start_time)-Date.parse(b.next_action_at||byRace.get(b.races?.id)?.predicted_at||b.races.start_time));
  const races=focus.map(item=>raceTimelineCard(item,byRace.get(item.races?.id))).join("");
@@ -86,7 +86,7 @@ function raceTimelineCard(item,p){
 }
 function renderDashboardTimeline(items,todayPreds,batch){
  const counts=s=>items.filter(x=>s.includes(x.state)).length,selectionDue=batch?.metadata?.selection_due_at,now=Date.now();
- const byRace=new Map(todayPreds.map(p=>[p.races?.id,p])),focus=items.filter(x=>["selected","final_refresh_pending","final_decided","completed","invalid_output"].includes(x.state)||byRace.has(x.races?.id));
+ const byRace=new Map(todayPreds.map(p=>[p.races?.id,p])),focus=items.filter(x=>["selected","final_refresh_pending","final_decided","completed","invalid_output","failed"].includes(x.state)||byRace.has(x.races?.id));
  todayPreds.forEach(p=>{if(!focus.some(x=>x.races?.id===p.races?.id))focus.push({state:"completed",next_action_at:null,races:p.races})});
  const trackColors={"札幌":"#0060A8","函館":"#007A5E","福島":"#C83B00","中山":"#004D40","東京":"#2B7030","新潟":"#B25900","中京":"#8D6200","京都":"#4C6B1F","阪神":"#1565C0","小倉":"#8E1515"},events=[
   {at:new Date().setHours(7,0,0,0),label:"開催情報を取得",sub:items.length?`${items.length}レースを登録`:"開催情報を確認",system:true,done:!!items.length},
