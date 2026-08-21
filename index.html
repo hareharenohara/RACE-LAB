@@ -35,6 +35,7 @@
       <button data-page="trace">AI判断ログ</button>
       <button data-page="analytics">成績分析</button>
       <button data-page="operations">実行履歴</button>
+      <button data-page="guide">仕組み</button>
     </nav>
     <div class="sidebar-foot"><i></i> ペーパー運用中<small>候補抽出 07:00・直前更新 T-20・結果 3分間隔</small><button id="logout">ログアウト</button></div>
   </aside>
@@ -65,6 +66,26 @@
     </section>
     <section id="analytics" class="page"><div class="metrics" id="analysis-metrics"></div><article class="panel"><div class="panel-title"><h2>単一AIパフォーマンス</h2><span>確定済み馬券・全期間</span></div><div class="table-wrap"><table><thead><tr><th>AI</th><th>購入額</th><th>払戻</th><th>損益</th><th>回収率</th><th>予測的中率</th><th>実的中率</th><th>確率誤差</th><th>Brier</th></tr></thead><tbody id="analysis-table"></tbody></table></div></article></section>
     <section id="operations" class="page"><article class="panel"><div class="panel-title"><h2>バッチ実行履歴</h2><span>収集・予測・結果反映</span></div><div id="audit-list"></div></article></section>
+    <section id="guide" class="page guide-page">
+      <section class="guide-hero"><div><p class="eyebrow">HOW RACE LAB WORKS</p><h2>集める、絞る、直前に判断する。</h2><p>RACE LABは、朝の時点で馬券を決めるシステムではありません。当日の全レースを確認し、情報が揃ったレースだけを比較。候補は発走直前にもう一度調べてから、Geminiが買うか見送るかを決めます。</p></div><div class="guide-principle"><span>大切な前提</span><strong>候補 ≠ 購入</strong><small>候補入り後も、直前情報やオッズによって全レース見送りがあります。</small></div></section>
+      <nav class="guide-jump" aria-label="仕組みページ内メニュー"><a href="#guide-flow">処理の流れ</a><a href="#guide-roles">役割分担</a><a href="#guide-money">資金管理</a><a href="#guide-safety">安全対策</a><a href="#guide-screen">画面の見方</a><a href="#guide-words">用語集</a></nav>
+      <section id="guide-flow" class="guide-section"><div class="guide-heading"><div><p class="eyebrow">DAILY FLOW</p><h2>1日の処理の流れ</h2></div><span>すべて日本時間</span></div><div class="guide-flow">
+        <article><time>07:00</time><i>1</i><div><h3>開催情報を登録</h3><p>JRAの当日レース一覧を取得します。通常開催は最大36レース。開催がなければ「本日はJRA開催なし」で終了します。</p><small>この時点では候補も馬券も決まりません</small></div></article>
+        <article><time>07:00〜</time><i>2</i><div><h3>一次判定</h3><p>全レースを軽く確認し、分析に向きにくい条件を機械的に除外します。新馬・未勝利・障害・2歳・ハンデ、重／不良馬場、7頭以下、17頭以上などが対象です。</p><small>36/36は「全レースの確認完了」。36レースが候補という意味ではありません</small></div></article>
+        <article><time>09:00〜</time><i>3</i><div><h3>外部情報を収集</h3><p>一次判定を通過したレースから、出走馬、オッズ、外部評価などを取得します。直接取得できない場合だけ予備経路を使います。</p><small>2つ以上の利用可能な情報源（数値情報を1つ以上含む）が必要です</small></div></article>
+        <article><time>情報収集後</time><i>4</i><div><h3>候補レースを選定</h3><p>Geminiが情報の揃ったレースを横断比較し、最大3レースを最終判断の候補にします。プログラムは返されたレースが実在するかを検証します。</p><small>選定済みでも、まだ購入確定ではありません</small></div></article>
+        <article><time>発走20分前</time><i>5</i><div><h3>直前更新と最終判断</h3><p>出走馬、外部情報、最新オッズ、利用可能なペーパー残高を更新。Geminiが全出走馬を比較し、BETまたはSKIP、券種、組み合わせ、金額を決めます。</p><small>無効な回答は1回だけ訂正し、直せなければ安全停止します</small></div></article>
+        <article><time>発走後</time><i>6</i><div><h3>結果確認と精算</h3><p>09:00〜21:59の間、3分間隔で未確定レースを確認します。JRAの確定払戻を使ってペーパー残高と成績を更新します。</p><small>購入APIはなく、実際のお金は動きません</small></div></article>
+      </div></section>
+      <div class="guide-columns">
+        <section id="guide-roles" class="guide-section guide-card"><div class="guide-heading"><div><p class="eyebrow">WHO DECIDES WHAT</p><h2>AIとプログラムの役割</h2></div></div><div class="role-grid"><article><span>PROGRAM</span><h3>事実と安全を担当</h3><ul><li>レース・出走馬・情報・オッズの取得</li><li>馬番と馬名の一致確認</li><li>予算、発走時刻、馬券の実在確認</li><li>重複購入と二重精算の防止</li></ul></article><article><span>GEMINI</span><h3>比較と意思決定を担当</h3><ul><li>候補レースの比較と優先順位</li><li>全出走馬の評価と着順予想</li><li>BET／SKIPの最終判断</li><li>券種、組み合わせ、購入金額</li></ul></article></div><p class="guide-note">プログラムはAIの予想を期待値順に並べ替えたり、購入金額を黙って変更したりしません。技術的に不可能・不整合な内容だけを拒否します。</p></section>
+        <section id="guide-money" class="guide-section guide-card"><div class="guide-heading"><div><p class="eyebrow">PAPER BANKROLL</p><h2>資金管理</h2></div></div><div class="money-rules"><div><strong>100,000円</strong><span>初期ペーパー残高</span></div><div><strong>3.5%</strong><span>通常時の日次リスク枠</span></div><div><strong>100円</strong><span>購入金額の単位</span></div></div><ul class="guide-list"><li>当日開始残高の96.5%を通常の損失下限として守ります。</li><li>当日の利益が伸びると、利益の一部を守る下限が段階的に上がります。</li><li>未確定の購入金額も予約済み資金として差し引き、二重使用を防ぎます。</li><li>利用可能額が100円未満なら新しい購入を止めます。</li></ul><details><summary>利益保護（ラチェット）の詳細</summary><p>当日ピーク利益率が2.25%、3%、5%、7.5%、10%、15%、20%、30%に達すると、それぞれ1%、1.5%、2.5%、4%、6%、10%、14%、22%の利益を守る水準へ引き上げます。</p></details></section>
+      </div>
+      <section id="guide-safety" class="guide-section"><div class="guide-heading"><div><p class="eyebrow">SAFEGUARDS</p><h2>間違ったデータで買わないための仕組み</h2></div><span>異常時は推測せず停止</span></div><div class="safety-grid"><article><b>01</b><h3>当日データだけを表示</h3><p>日付と最新バッチを揃え、前日の処理や古い候補が本日のタイムラインに混ざらないよう分離します。</p></article><article><b>02</b><h3>馬の本人確認</h3><p>外部情報は馬番と正規化した馬名の両方がJRAの出走表と一致したものだけ使います。</p></article><article><b>03</b><h3>取得時点を保存</h3><p>情報、オッズ、AIへの入力と回答には時刻・版・ハッシュを記録し、後から判断をたどれるようにします。</p></article><article><b>04</b><h3>技術的な馬券検証</h3><p>単勝・複勝は1頭、ワイドは異なる2頭、オッズ表への存在、100円単位、残高内、発走前を確認します。</p></article><article><b>05</b><h3>確定払戻だけで精算</h3><p>発走前のオッズは払戻として使いません。JRAの確定した100円当たり払戻だけで損益を計算します。</p></article><article><b>06</b><h3>失敗を見える化</h3><p>情報不足、通信失敗、AI出力不正は候補から安全に外し、概要と実行履歴に理由を表示します。</p></article></div></section>
+      <section id="guide-screen" class="guide-section"><div class="guide-heading"><div><p class="eyebrow">SCREEN GUIDE</p><h2>各画面でわかること</h2></div></div><div class="screen-grid"><article><b>概要</b><p>今どの処理中か、次に何が起きるか、候補・購入・結果・エラーを確認。</p></article><article><b>予想・運用</b><p>レースごとの予想、買い目、判断理由、結果を確認。</p></article><article><b>AI判断ログ</b><p>AIに渡した材料、回答、検証、最終判断までを追跡。</p></article><article><b>成績分析</b><p>確定済み馬券の投資、払戻、回収率、予測精度を集計。</p></article><article><b>実行履歴</b><p>日次処理、ワーカー、結果取得の成功・失敗と時刻を確認。</p></article></div></section>
+      <section id="guide-words" class="guide-section"><div class="guide-heading"><div><p class="eyebrow">GLOSSARY & FAQ</p><h2>用語とよくある疑問</h2></div></div><div class="guide-details"><details open><summary>一次判定 36/36とは？</summary><p>登録された36レースすべての事前確認が終わった、という意味です。通過数と除外数は別に表示され、購入数や候補数ではありません。</p></details><details><summary>候補レースとは？</summary><p>外部情報が揃ったレースをGeminiが比較し、発走20分前の最終判断へ進めたレースです。最大3レースで、候補になってもSKIPがあります。</p></details><details><summary>外部情報「取得済み／対象」とは？</summary><p>分母は一次判定を通過して詳細収集の対象になった数、分子は情報収集が完了した数です。情報不足で対象外になったレースも履歴に残ります。</p></details><details><summary>BETとSKIPとは？</summary><p>BETはペーパー購入、SKIPは見送りです。候補選定とBETは別の段階です。</p></details><details><summary>なぜ結果がすぐ確定しない？</summary><p>レース終了直後ではなく、JRAの結果と払戻が取得できてから確定します。取得処理は3分間隔ですが、公式確定や通信状況により時間差があります。</p></details><details><summary>これは実際に馬券を買う？</summary><p>いいえ。現在はペーパー運用で、実購入APIは接続していません。表示される残高・投資・払戻・損益はすべて検証用です。</p></details></div></section>
+      <p class="guide-updated">このページは現在の Adaptive V2 の実装に基づいています。</p>
+    </section>
   </main>
   <script src="./analytics-core.js"></script><script src="./app.js"></script><script>document.getElementById("refresh-data").addEventListener("click",load)</script>
 </body>
