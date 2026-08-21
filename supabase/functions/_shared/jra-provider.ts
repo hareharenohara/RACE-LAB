@@ -149,6 +149,17 @@ const validRaceTime = (value: string) => {
 };
 
 export function validateRaceSchedule(races: RaceSummary[], date: string) {
+  if (races.length > 36) {
+    throw new Error(
+      `JRA_RACE_SCHEDULE_SUSPICIOUS:race_count_${races.length}_exceeds_36`,
+    );
+  }
+  const raceSlots = new Set(
+    races.map((race) => `${race.track}:${race.raceNumber}`),
+  );
+  if (raceSlots.size !== races.length) {
+    throw new Error("JRA_RACE_SCHEDULE_SUSPICIOUS:duplicate_track_race_number");
+  }
   const invalid = races.filter((race) =>
     race.raceDate !== date ||
     !Number.isFinite(Date.parse(race.startTime)) ||

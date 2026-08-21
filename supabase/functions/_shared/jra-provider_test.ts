@@ -85,7 +85,10 @@ Deno.test("race list uses the time from the same race item", () => {
 Deno.test("missing race time fails closed instead of defaulting to 09:00", () => {
   let failed = false;
   try {
-    parseRaceListHtml(`<li class="RaceList_DataItem"><a href="shutuba.html?race_id=202604020801">1R</a></li>`, "2026-08-16");
+    parseRaceListHtml(
+      `<li class="RaceList_DataItem"><a href="shutuba.html?race_id=202604020801">1R</a></li>`,
+      "2026-08-16",
+    );
   } catch (error) {
     failed = String(error).includes("JRA_RACE_TIME_MISSING");
   }
@@ -96,11 +99,70 @@ Deno.test("an implausible all-identical schedule is rejected", () => {
   let failed = false;
   try {
     validateRaceSchedule([
-      { externalId: "jra:1", raceDate: "2026-08-16", track: "札幌", raceNumber: 1, raceName: "A", startTime: "2026-08-16T09:00:00+09:00", sourceUrl: "a" },
-      { externalId: "jra:2", raceDate: "2026-08-16", track: "札幌", raceNumber: 2, raceName: "B", startTime: "2026-08-16T09:00:00+09:00", sourceUrl: "b" },
+      {
+        externalId: "jra:1",
+        raceDate: "2026-08-16",
+        track: "札幌",
+        raceNumber: 1,
+        raceName: "A",
+        startTime: "2026-08-16T09:00:00+09:00",
+        sourceUrl: "a",
+      },
+      {
+        externalId: "jra:2",
+        raceDate: "2026-08-16",
+        track: "札幌",
+        raceNumber: 2,
+        raceName: "B",
+        startTime: "2026-08-16T09:00:00+09:00",
+        sourceUrl: "b",
+      },
     ], "2026-08-16");
   } catch (error) {
     failed = String(error).includes("JRA_RACE_SCHEDULE_SUSPICIOUS");
   }
   if (!failed) throw new Error("identical schedule was accepted");
+});
+
+Deno.test("more than the JRA daily maximum of 36 races is rejected", () => {
+  const races = Array.from({ length: 37 }, (_, index) => ({
+    externalId: `jra:${index}`,
+    raceDate: "2026-08-16",
+    track: `会場${Math.floor(index / 12)}`,
+    raceNumber: index % 12 + 1,
+    raceName: `Race ${index}`,
+    startTime: `2026-08-16T${
+      String(9 + Math.floor(index / 6)).padStart(2, "0")
+    }:${index % 6}0:00+09:00`,
+    sourceUrl: `https://example.test/${index}`,
+  }));
+  let failed = false;
+  try {
+    validateRaceSchedule(races, "2026-08-16");
+  } catch (error) {
+    failed = String(error).includes("race_count_37_exceeds_36");
+  }
+  if (!failed) throw new Error("37-race schedule was accepted");
+});
+
+Deno.test("duplicate track and race number slots are rejected", () => {
+  const race = {
+    externalId: "jra:1",
+    raceDate: "2026-08-16",
+    track: "札幌",
+    raceNumber: 1,
+    raceName: "A",
+    startTime: "2026-08-16T09:00:00+09:00",
+    sourceUrl: "https://example.test/1",
+  };
+  let failed = false;
+  try {
+    validateRaceSchedule([
+      race,
+      { ...race, externalId: "jra:2", startTime: "2026-08-16T09:30:00+09:00" },
+    ], "2026-08-16");
+  } catch (error) {
+    failed = String(error).includes("duplicate_track_race_number");
+  }
+  if (!failed) throw new Error("duplicate race slot was accepted");
 });
