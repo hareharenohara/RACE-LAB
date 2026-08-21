@@ -876,6 +876,7 @@ Deno.serve(async (req) => {
   try {
     const stage = batch.metadata.pipeline_stage;
     let metadata = batch.metadata;
+    let terminalError: string | null = null;
     if (stage === "stage1") metadata = await stage1(db, batch);
     else if (stage === "evidence") {
       const due = Date.parse(batch.metadata.selection_due_at ?? "");
@@ -922,7 +923,19 @@ Deno.serve(async (req) => {
         count: "exact",
         head: true,
       }).eq("batch_run_id", batch.id).eq("state", "selected");
-      if (!count) metadata = { ...metadata, pipeline_stage: "complete" };
+      if (!count) {
+        const { count: issueCount, error: issueCountError } = await db.from(
+          "race_pipeline_items",
+        ).select("id", { count: "exact", head: true }).eq(
+          "batch_run_id",
+          batch.id,
+        ).in("state", ["failed", "invalid_output"]);
+        if (issueCountError) throw issueCountError;
+        if (issueCount) {
+          terminalError = `PIPELINE_COMPLETED_WITH_${issueCount}_ITEM_ERRORS`;
+        }
+        metadata = { ...metadata, pipeline_stage: "complete" };
+      }
       else {
         await db.rpc("release_prediction_worker_lease", {
           p_batch_run_id: batch.id,
@@ -934,8 +947,8 @@ Deno.serve(async (req) => {
     const complete = metadata.pipeline_stage === "complete";
     await db.from("batch_runs").update({
       metadata,
-      status: complete ? "succeeded" : "running",
-      error_message: null,
+      status: complete ? (terminalError ? "failed" : "succeeded") : "running",
+      error_message: terminalError,
       finished_at: complete ? nowIso() : null,
     }).eq("id", batch.id);
     await db.rpc("release_prediction_worker_lease", {
