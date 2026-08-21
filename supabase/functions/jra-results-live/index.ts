@@ -3,6 +3,7 @@ import * as cheerio from "npm:cheerio@1.0.0";
 import webpush from "npm:web-push@3.6.7";
 import { optimizeEvaluationWeights } from "../_shared/weight-optimizer.ts";
 import { fitCalibration } from "../_shared/probability-calibrator.ts";
+import { calculateDailyBankrollState } from "../_shared/bankroll-management.ts";
 
 type BetType =
   | "win"
@@ -160,7 +161,7 @@ Deno.serve(async (req) => {
   const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
     .slice(0, 10);
   const { data: races, error } = await db.from("races").select(
-    "id,external_id,track,race_number,race_name,start_time,status",
+    "id,external_id,race_date,track,race_number,race_name,start_time,status",
   ).like("external_id", "jra:%").gte("race_date", since).lt(
     "start_time",
     cutoff,
@@ -259,6 +260,42 @@ Deno.serve(async (req) => {
           if (rolloverError) throw rolloverError;
         }
         settledBets++;
+      }
+      const { data: storedBankroll } = await db.from("daily_bankroll_states")
+        .select("*").eq("strategy", "single").eq(
+          "session_date",
+          race.race_date,
+        ).maybeSingle();
+      if (storedBankroll) {
+        const [{ data: account }, { data: available }] = await Promise.all([
+          db.from("strategy_accounts").select("current_balance").eq(
+            "strategy",
+            "single",
+          ).single(),
+          db.rpc("available_paper_balance", { p_strategy: "single" }),
+        ]);
+        const openReservations = Math.max(
+          0,
+          Number(account?.current_balance ?? 0) - Number(available ?? 0),
+        );
+        const bankroll = calculateDailyBankrollState(
+          Number(storedBankroll.opening_balance),
+          Number(account?.current_balance ?? storedBankroll.opening_balance),
+          Number(storedBankroll.peak_balance),
+          openReservations,
+        );
+        const { error: bankrollUpdateError } = await db.from(
+          "daily_bankroll_states",
+        ).update({
+          peak_balance: bankroll.peakBalance,
+          loss_floor: bankroll.lossFloor,
+          lock_balance: bankroll.lockBalance,
+          peak_profit_rate: bankroll.peakProfitRate,
+          lock_profit_rate: bankroll.lockProfitRate,
+          mode: bankroll.mode,
+          updated_at: new Date().toISOString(),
+        }).eq("id", storedBankroll.id);
+        if (bankrollUpdateError) throw bankrollUpdateError;
       }
       await db.from("races").update({
         status: "finished",

@@ -1,3 +1,5 @@
+export const EXTERNAL_PARSER_VERSION = "external-multisource-v3";
+
 export const SOURCE_PROFILES = [
   { name: "ai-shisu", origin: "https://www.ai-shisu.com", numeric: true },
   {
@@ -7,6 +9,12 @@ export const SOURCE_PROFILES = [
   },
   { name: "uma-x", origin: "https://uma-x.jp", numeric: true },
   { name: "kichiuma", origin: "https://kichiuma.net", numeric: true },
+  { name: "athena", origin: "https://keiba-ai.jp", numeric: true },
+  {
+    name: "keiba-navi",
+    origin: "https://m-jockey.co.jp/keiba-navi/jra/ai/",
+    numeric: true,
+  },
 ] as const;
 
 export type SourceProfile = typeof SOURCE_PROFILES[number];
@@ -32,7 +40,13 @@ export type NormalizedSourceEvidence = {
   status: "ok" | "unavailable";
   numeric: boolean;
   horses: SourceHorseSignal[];
+  raceMetrics?: {
+    roughness?: number;
+    roughnessScale?: "1-18";
+    roughnessBasis?: "odds-derived";
+  };
   missingFields: string[];
+  identityStatus?: "verified" | "partial" | "failed";
 };
 
 const UA =
@@ -118,20 +132,30 @@ export async function fetchRaceSourcePage(
   profile: SourceProfile,
   race: { raceDate: string; track: string; raceNumber: number },
 ) {
-  const trackCode: Record<string, { uma?: string; kichi?: string }> = {
-    "札幌": { uma: "1", kichi: "71" },
-    "函館": { uma: "2", kichi: "72" },
-    "福島": { uma: "3", kichi: "73" },
-    "新潟": { uma: "4", kichi: "74" },
-    "東京": { uma: "5", kichi: "75" },
-    "中山": { uma: "6", kichi: "76" },
-    "中京": { uma: "7", kichi: "77" },
-    "京都": { uma: "8", kichi: "78" },
-    "阪神": { uma: "9", kichi: "79" },
-    "小倉": { uma: "0", kichi: "70" },
+  const trackCode: Record<
+    string,
+    { uma?: string; kichi?: string; jra?: string }
+  > = {
+    "札幌": { uma: "1", kichi: "71", jra: "01" },
+    "函館": { uma: "2", kichi: "72", jra: "02" },
+    "福島": { uma: "3", kichi: "73", jra: "03" },
+    "新潟": { uma: "4", kichi: "74", jra: "04" },
+    "東京": { uma: "5", kichi: "75", jra: "05" },
+    "中山": { uma: "6", kichi: "76", jra: "06" },
+    "中京": { uma: "7", kichi: "77", jra: "07" },
+    "京都": { uma: "8", kichi: "78", jra: "08" },
+    "阪神": { uma: "9", kichi: "79", jra: "09" },
+    "小倉": { uma: "0", kichi: "70", jra: "10" },
   };
   const codes = trackCode[race.track];
   const compactDate = race.raceDate.replaceAll("-", "");
+  if (profile.name === "keiba-navi" && codes?.jra) {
+    return await fetchSourcePage(
+      `${profile.origin}?ymd=${compactDate}&venue=${codes.jra}&race_num=${
+        String(race.raceNumber).padStart(2, "0")
+      }`,
+    );
+  }
   if (profile.name === "kichiuma" && codes?.kichi) {
     const [year, month, day] = race.raceDate.split("-").map(Number);
     const index = await fetchSourcePage(
@@ -152,6 +176,34 @@ export async function fetchRaceSourcePage(
   const index = await fetchSourcePage(
     `${profile.origin}/?s=${encodeURIComponent(query)}`,
   );
+  if (profile.name === "athena") {
+    const [year, month, day] = race.raceDate.split("-").map(Number);
+    const dateLabel = `${year}年${String(month).padStart(2, "0")}月${
+      String(day).padStart(2, "0")
+    }日`;
+    const dailyHref = [
+      ...index.html.matchAll(
+        /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+      ),
+    ].find((match) => {
+      const label = clean(match[2]);
+      return label.includes(dateLabel) && label.includes("レースAI予想") &&
+        !label.includes("予想結果");
+    })?.[1];
+    const dailyUrl = dailyHref
+      ? new URL(dailyHref, profile.origin).toString()
+      : null;
+    if (!dailyUrl) return index;
+    const daily = await fetchSourcePage(dailyUrl);
+    return {
+      ...daily,
+      html: extractAthenaRaceSection(
+        daily.html,
+        race.track,
+        race.raceNumber,
+      ),
+    };
+  }
   if (profile.name === "uma-x" && codes?.uma) {
     const suffix = `${String(race.raceNumber).padStart(2, "0")}${compactDate}`;
     const href = [
@@ -270,6 +322,72 @@ function parseKichiuma(html: string): SourceHorseSignal[] {
   return horses;
 }
 
+export function extractAthenaRaceSection(
+  html: string,
+  track: string,
+  raceNumber: number,
+) {
+  const headings = [...html.matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi)];
+  const trackHeading = headings.find((match) => clean(match[1]) === track);
+  if (trackHeading?.index === undefined) return "";
+  const nextTrack = headings.find((match) => match.index! > trackHeading.index!);
+  const trackHtml = html.slice(trackHeading.index, nextTrack?.index ?? html.length);
+  const titles = [
+    ...trackHtml.matchAll(
+      /<div\b[^>]*class=["'][^"']*\bsu-box-title\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi,
+    ),
+  ];
+  const wanted = `${String(raceNumber).padStart(2, "0")}R`;
+  const raceTitle = titles.find((match) => clean(match[1]).startsWith(wanted));
+  if (raceTitle?.index === undefined) return "";
+  const nextRace = titles.find((match) => match.index! > raceTitle.index!);
+  return trackHtml.slice(raceTitle.index, nextRace?.index ?? trackHtml.length);
+}
+
+function parseAthena(html: string): SourceHorseSignal[] {
+  const table = [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)]
+    .find((match) => {
+      const header = clean(match[1]).replace(/\s+/g, "");
+      return header.includes("予想勝率") && header.includes("AI指数") &&
+        header.includes("予想着順");
+    })?.[1];
+  if (!table) return [];
+  const horses: SourceHorseSignal[] = [];
+  for (const row of table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const values = cells(row[1]);
+    const horseNumber = Number(values[0]);
+    const horseName = values[1]?.split(/\s+/)[0];
+    const score = Number(values[6]?.match(/\((-?\d+(?:\.\d+)?)\)/)?.[1]);
+    if (horseNumber >= 1 && horseNumber <= 20 && horseName && Number.isFinite(score)) {
+      horses.push({ horseNumber, horseName, rawScore: score });
+    }
+  }
+  return horses;
+}
+
+function parseKeibaNavi(html: string): SourceHorseSignal[] {
+  const table = [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)]
+    .find((match) => {
+      const header = clean(match[1]);
+      return header.includes("馬番") && header.includes("馬名") &&
+        header.includes("ナビ指数");
+    })?.[1];
+  if (!table) return [];
+  const horses: SourceHorseSignal[] = [];
+  for (const row of table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const values = cells(row[1]);
+    const horseNumber = Number(values[1]);
+    const horseName = clean(
+      row[1].match(/<b>\s*<a\b[^>]*>([\s\S]*?)<\/a>\s*<\/b>/i)?.[1] ?? "",
+    );
+    const score = Number(values[4]);
+    if (horseNumber >= 1 && horseNumber <= 20 && horseName && Number.isFinite(score)) {
+      horses.push({ horseNumber, horseName, rawScore: score });
+    }
+  }
+  return horses;
+}
+
 /** Conservative generic extractor; site-specific failures remain visible as missing data. */
 export function normalizeSourcePage(
   profile: SourceProfile,
@@ -282,6 +400,10 @@ export function normalizeSourcePage(
     ? parseUmaX(page.html)
     : profile.name === "kichiuma"
     ? parseKichiuma(page.html)
+    : profile.name === "athena"
+    ? parseAthena(page.html)
+    : profile.name === "keiba-navi"
+    ? parseKeibaNavi(page.html)
     : [];
   for (const row of textRows) {
     const match = row.match(
@@ -301,6 +423,12 @@ export function normalizeSourcePage(
   }
   horses.sort((a, b) => (b.rawScore ?? -Infinity) - (a.rawScore ?? -Infinity));
   horses.forEach((horse, index) => horse.rank = index + 1);
+  const roughness = profile.name === "uma-x"
+    ? Number(
+      page.html.match(/\/(?:race|nar)_aredo\/(\d{1,2})(?:[?"'])/i)?.[1] ??
+        clean(page.html).match(/荒れ度\s*(?:は|：|:)?\s*(\d{1,2})/)?.[1],
+    )
+    : NaN;
   return {
     source: profile.name,
     sourceUrl: page.url,
@@ -309,6 +437,15 @@ export function normalizeSourcePage(
     status: horses.length ? "ok" : "unavailable",
     numeric: profile.numeric,
     horses,
+    ...(Number.isInteger(roughness) && roughness >= 1 && roughness <= 18
+      ? {
+        raceMetrics: {
+          roughness,
+          roughnessScale: "1-18" as const,
+          roughnessBasis: "odds-derived" as const,
+        },
+      }
+      : {}),
     missingFields: horses.length ? [] : ["horse_signals"],
   };
 }

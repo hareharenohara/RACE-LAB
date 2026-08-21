@@ -68,11 +68,23 @@ export function verifySourceIdentities(
 }
 
 export const identitySummary = (checks: IdentityCheck[]) =>
-  checks.some((check) => check.status === "mismatch")
-    ? "failed"
-    : checks.length
+  checks.length && checks.every((check) => check.status !== "mismatch")
     ? "verified"
-    : "partial";
+    : checks.some((check) => check.status !== "mismatch")
+    ? "partial"
+    : "failed";
+
+export function filterVerifiedSourceHorses<T extends SourceIdentity>(
+  source: T[],
+  canonical: SourceIdentity[],
+) {
+  const checks = verifySourceIdentities(source, canonical);
+  return {
+    checks,
+    horses: source.filter((_, index) => checks[index]?.status !== "mismatch"),
+    identityStatus: identitySummary(checks),
+  };
+}
 
 export async function sha256Json(value: unknown) {
   const bytes = new Uint8Array(

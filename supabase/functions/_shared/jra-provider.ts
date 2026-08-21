@@ -1,5 +1,6 @@
 import type { BetType, Entry, RaceOdds, RaceSummary } from "./types.ts";
 import * as cheerio from "npm:cheerio@1.0.0";
+import { validateMarketOdds } from "./odds-validation.ts";
 
 const BASE = "https://race.netkeiba.com";
 const headers = { "user-agent": "RaceLab-Personal/1.0", "referer": `${BASE}/` };
@@ -22,10 +23,16 @@ const num = (s?: string) => {
   const n = Number((s ?? "").replace(/,/g, ""));
   return Number.isFinite(n) ? n : undefined;
 };
-const fetchText = async (url: string) => {
-  const r = await fetch(url, { headers });
-  if (!r.ok) throw new Error(`JRA_SOURCE_HTTP_${r.status}`);
-  return r.text();
+const fetchText = async (url: string, timeoutMs = 10_000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { headers, signal: controller.signal });
+    if (!r.ok) throw new Error(`JRA_SOURCE_HTTP_${r.status}`);
+    return await r.text();
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 export interface JraDetail {
@@ -150,7 +157,9 @@ export function validateRaceSchedule(races: RaceSummary[], date: string) {
   );
   if (invalid.length) {
     throw new Error(
-      `JRA_RACE_SCHEDULE_INVALID:${invalid.map((race) => race.externalId).join(",")}`,
+      `JRA_RACE_SCHEDULE_INVALID:${
+        invalid.map((race) => race.externalId).join(",")
+      }`,
     );
   }
   const distinctTimes = new Set(races.map((race) => race.startTime));
@@ -160,7 +169,9 @@ export function validateRaceSchedule(races: RaceSummary[], date: string) {
 }
 
 export function parseRaceListHtml(html: string, date: string): RaceSummary[] {
-  const $ = cheerio.load(html), races: RaceSummary[] = [], seen = new Set<string>();
+  const $ = cheerio.load(html),
+    races: RaceSummary[] = [],
+    seen = new Set<string>();
   $("li.RaceList_DataItem").each((_, element) => {
     const item = $(element),
       href = item.find('a[href*="shutuba.html"][href*="race_id="]').first()
@@ -265,13 +276,14 @@ export class JraProvider {
           values = raw as string[],
           price = num(values[0]);
         if (price) {
-          odds.push({
+          const market = {
             type,
             horses,
             odds: price,
             oddsMax: num(values[1]),
             popularity: num(values[2]),
-          });
+          };
+          if (validateMarketOdds(market).valid) odds.push(market);
         }
       }
     }

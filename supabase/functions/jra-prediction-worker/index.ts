@@ -3,6 +3,12 @@ import { JraProvider } from "../_shared/jra-provider.ts";
 import { callGemini, MODEL } from "../_shared/gemini-client.ts";
 import { applyStage1Filter } from "../_shared/stage1-filter.ts";
 import {
+  DEFAULT_EVALUATION_WEIGHTS,
+  evaluateRace,
+  type EvaluationWeights,
+} from "../_shared/horse-evaluation.ts";
+import {
+  EXTERNAL_PARSER_VERSION,
   fetchRaceSourcePage,
   hasEvidenceQuorum,
   normalizeSourcePage,
@@ -15,14 +21,25 @@ import {
   buildRaceSelectionPrompt,
   FINAL_DECISION_SCHEMA,
   RACE_SELECTION_SCHEMA,
-  validateFinalDecision,
+  selectRaceAssessments,
 } from "../_shared/adaptive-prompts.ts";
 import {
+  filterVerifiedSourceHorses,
   sha256Json,
-  verifySourceIdentities,
 } from "../_shared/source-evidence.ts";
 import type { RaceSummary } from "../_shared/types.ts";
-import { resolveFinalMarkets } from "../_shared/finalization.ts";
+import { marketKey } from "../_shared/finalization.ts";
+import {
+  buildAiBetAudit,
+  validateAiBetDecision,
+} from "../_shared/ai-bet-decision.ts";
+import { validateMarketOdds } from "../_shared/odds-validation.ts";
+import { buildRaceSelectionMarket } from "../_shared/race-selection-market.ts";
+import {
+  allocateDailyRiskBudget,
+  calculateDailyBankrollState,
+  currentRaceBudget,
+} from "../_shared/bankroll-management.ts";
 
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), {
@@ -197,6 +214,10 @@ async function collectEvidence(db: any, batch: any, item: any) {
   if (error) throw error;
   const provider = new JraProvider();
   const detail = await provider.getDetail(summaryFrom(race));
+  const selectionMarket = buildRaceSelectionMarket(
+    detail.entries,
+    detail.odds,
+  );
   const canonical = await saveDetail(db, race, detail);
   const refined = applyStage1Filter({
     raceName: detail.race.raceName,
@@ -246,26 +267,14 @@ async function collectEvidence(db: any, batch: any, item: any) {
     }
     try {
       const { page, normalized } = fetched;
-      const checks = verifySourceIdentities(
-        normalized.horses.map((horse) => ({
-          horseNumber: horse.horseNumber,
-          horseName: horse.horseName,
-        })),
+      const verified = filterVerifiedSourceHorses(
+        normalized.horses,
         canonical,
       );
-      const identityStatus = checks.length && checks.every((x) =>
-          x.status !== "mismatch"
-        )
-        ? "verified"
-        : checks.some((x) => x.status !== "mismatch")
-        ? "partial"
-        : "failed";
       const safe = {
         ...normalized,
-        horses: normalized.horses.filter((horse) =>
-          checks.find((x) => x.horseNumber === horse.horseNumber)?.status !==
-            "mismatch"
-        ),
+        horses: verified.horses,
+        identityStatus: verified.identityStatus,
       };
       safe.status = safe.horses.length ? "ok" : "unavailable";
       safe.missingFields = safe.horses.length ? [] : ["verified_horse_signals"];
@@ -279,14 +288,14 @@ async function collectEvidence(db: any, batch: any, item: any) {
         source_url: page.url,
         captured_at: page.capturedAt,
         content_hash: await hash(safe),
-        parser_version: "external-generic-v2",
-        identity_status: identityStatus,
+        parser_version: EXTERNAL_PARSER_VERSION,
+        identity_status: verified.identityStatus,
         extracted_data: safe,
       }).select("id").single();
       if (snapshotError) throw snapshotError;
-      if (checks.length) {
+      if (verified.checks.length) {
         const { error: checkError } = await db.from("entry_identity_checks")
-          .insert(checks.map((check) => ({
+          .insert(verified.checks.map((check) => ({
             snapshot_id: snapshot.id,
             race_id: race.id,
             horse_id: canonical.find((horse) =>
@@ -318,7 +327,11 @@ async function collectEvidence(db: any, batch: any, item: any) {
   await db.from("race_pipeline_items").update({
     state: quality.ready ? "evidence_ready" : "evidence_insufficient",
     evidence,
-    evidence_quality: { ...quality, snapshot_ids: snapshotIds },
+    evidence_quality: {
+      ...quality,
+      snapshot_ids: snapshotIds,
+      selection_market: selectionMarket,
+    },
     updated_at: nowIso(),
   }).eq("id", item.id);
 }
@@ -334,6 +347,29 @@ async function selectRaces(db: any, batch: any) {
       completed_summary: { reason: "no_stage1_candidates" },
     };
   }
+  const provider = new JraProvider();
+  const refreshedMarkets = new Map<string, ReturnType<typeof buildRaceSelectionMarket>>();
+  await Promise.all(items.map(async (item: any) => {
+    try {
+      const detail = await provider.getDetail(summaryFrom(item.races));
+      const market = buildRaceSelectionMarket(detail.entries, detail.odds);
+      refreshedMarkets.set(String(item.race_id), market);
+      item.evidence_quality = {
+        ...(item.evidence_quality ?? {}),
+        selection_market: market,
+      };
+      await db.from("race_pipeline_items").update({
+        evidence_quality: item.evidence_quality,
+        updated_at: nowIso(),
+      }).eq("id", item.id);
+    } catch {
+      refreshedMarkets.set(String(item.race_id), {
+        status: "unavailable",
+        captured_at: nowIso(),
+        runners: [],
+      });
+    }
+  }));
   const input = {
     target_date: batch.target_date,
     races: items.map((x: any) => ({
@@ -341,6 +377,11 @@ async function selectRaces(db: any, batch: any) {
       race: x.races,
       evidence: x.evidence,
       quality: x.evidence_quality,
+      market: refreshedMarkets.get(String(x.race_id)) ?? {
+        status: "unavailable",
+        captured_at: null,
+        runners: [],
+      },
     })),
   };
   const call = await ai(
@@ -355,10 +396,54 @@ async function selectRaces(db: any, batch: any) {
       ),
     },
   );
-  const validIds = new Set(items.map((x: any) => String(x.race_id)));
-  const selections = ((call.value as any).selections ?? []).filter((x: any) =>
-    validIds.has(String(x.race_id))
-  ).slice(0, 3);
+  const validIds = new Set<string>(items.map((x: any) => String(x.race_id)));
+  const horseNumbers = new Map<string, Set<number>>(items.map((x: any) => [
+    String(x.race_id),
+    new Set<number>(
+      (x.evidence ?? []).flatMap((source: any) =>
+        (source.horses ?? []).map((horse: any) => Number(horse.horseNumber))
+      ).filter(Number.isFinite),
+    ),
+  ]));
+  const selections = selectRaceAssessments(call.value, validIds, horseNumbers);
+  const { data: account, error: accountError } = await db.from(
+    "strategy_accounts",
+  ).select("current_balance").eq("strategy", "single").single();
+  if (accountError) throw accountError;
+  const { data: existingBankroll } = await db.from("daily_bankroll_states")
+    .select("*").eq("strategy", "single").eq(
+      "session_date",
+      batch.target_date,
+    ).maybeSingle();
+  const openingBalance = Number(
+    existingBankroll?.opening_balance ?? account.current_balance,
+  );
+  const bankroll = calculateDailyBankrollState(
+    openingBalance,
+    Number(account.current_balance),
+    Number(existingBankroll?.peak_balance ?? openingBalance),
+  );
+  const allocations = allocateDailyRiskBudget(
+    openingBalance,
+    selections.map((selection) => ({
+      raceId: selection.race_id,
+      weight: selection.budget_weight,
+    })),
+  );
+  const { error: bankrollError } = await db.from("daily_bankroll_states")
+    .upsert({
+      strategy: "single",
+      session_date: batch.target_date,
+      opening_balance: bankroll.openingBalance,
+      peak_balance: bankroll.peakBalance,
+      loss_floor: bankroll.lossFloor,
+      lock_balance: bankroll.lockBalance,
+      peak_profit_rate: bankroll.peakProfitRate,
+      lock_profit_rate: bankroll.lockProfitRate,
+      mode: bankroll.mode,
+      updated_at: nowIso(),
+    }, { onConflict: "strategy,session_date" });
+  if (bankrollError) throw bankrollError;
   for (const item of items) {
     const selected = selections.find((x: any) =>
       String(x.race_id) === String(item.race_id)
@@ -372,10 +457,16 @@ async function selectRaces(db: any, batch: any) {
     }
     const finalAt = new Date(Date.parse(item.races.start_time) - 20 * 60_000)
       .toISOString();
+    const selectionReason =
+      `AI_SELECTION: ${selected.selection_reason} / 比較判断: ${selected.decision_reason}`;
+    const initialBudget = allocations.get(selected.race_id) ?? 0;
     await db.from("race_pipeline_items").update({
       state: "selected",
       selection_rank: selected.priority,
-      selection_reason: selected.reason,
+      selection_reason: selectionReason,
+      budget_weight: selected.budget_weight,
+      initial_budget: initialBudget,
+      budget_mode: "normal",
       next_action_at: finalAt,
       updated_at: nowIso(),
     }).eq("id", item.id);
@@ -383,8 +474,8 @@ async function selectRaces(db: any, batch: any) {
       batch_run_id: batch.id,
       race_id: item.race_id,
       strategy: "single",
-      score: Math.max(0, 100 - (Number(selected.priority) - 1) * 10),
-      reason: selected.reason,
+      score: selected.total_score,
+      reason: selectionReason,
       rank: selected.priority,
       ai_call_id: call.callId,
     }, { onConflict: "batch_run_id,strategy,race_id" });
@@ -419,13 +510,104 @@ async function finalDecision(db: any, batch: any, item: any) {
     item.race_id,
   ).single();
   const detail = await new JraProvider().getDetail(summaryFrom(race));
-  await saveDetail(db, race, detail);
+  const canonical = await saveDetail(db, race, detail);
+  let independentEvaluation: Record<string, unknown> = {
+    status: "unavailable",
+    reason: "past_runs_not_collected",
+    evaluations: [],
+  };
+  try {
+    const provider = new JraProvider();
+    const pastRuns = await provider.getPastRuns(summaryFrom(race));
+    const pastRunsByHorse = new Map<string, typeof pastRuns>();
+    for (const run of pastRuns) {
+      const history = pastRunsByHorse.get(run.externalHorseId) ?? [];
+      if (history.length >= 5) continue;
+      history.push(run);
+      pastRunsByHorse.set(run.externalHorseId, history);
+    }
+    let weights: EvaluationWeights = DEFAULT_EVALUATION_WEIGHTS;
+    const { data: weightProfile } = await db.from("evaluation_weight_profiles")
+      .select(
+        "ability_weight,suitability_weight,condition_weight,race_context_weight,formula_version",
+      ).eq("is_active", true).maybeSingle();
+    if (weightProfile) {
+      weights = {
+        ability: Number(weightProfile.ability_weight),
+        suitability: Number(weightProfile.suitability_weight),
+        condition: Number(weightProfile.condition_weight),
+        raceContext: Number(weightProfile.race_context_weight),
+      };
+    }
+    independentEvaluation = {
+      status: "ok",
+      formulaVersion: weightProfile?.formula_version ?? "deterministic-v1",
+      excludesCurrentOddsAndPopularity: true,
+      weights,
+      evaluations: evaluateRace(
+        detail.race,
+        detail.entries,
+        pastRunsByHorse,
+        weights,
+      ).sort((a, b) => b.overallScore - a.overallScore),
+    };
+  } catch (error) {
+    independentEvaluation = {
+      status: "unavailable",
+      reason: String(error),
+      evaluations: [],
+    };
+  }
   const odds = detail.odds.filter((x: any) =>
-    ["win", "place", "wide"].includes(x.type)
+    ["win", "place", "wide", "quinella"].includes(x.type)
   );
   const { data: available } = await db.rpc("available_paper_balance", {
     p_strategy: "single",
   });
+  const { data: account, error: accountError } = await db.from(
+    "strategy_accounts",
+  ).select("current_balance").eq("strategy", "single").single();
+  if (accountError) throw accountError;
+  const { data: storedBankroll, error: bankrollError } = await db.from(
+    "daily_bankroll_states",
+  ).select("*").eq("strategy", "single").eq(
+    "session_date",
+    batch.target_date,
+  ).single();
+  if (bankrollError) throw bankrollError;
+  const openReservations = Math.max(
+    0,
+    Number(account.current_balance) - Number(available ?? 0),
+  );
+  const bankroll = calculateDailyBankrollState(
+    Number(storedBankroll.opening_balance),
+    Number(account.current_balance),
+    Number(storedBankroll.peak_balance),
+    openReservations,
+  );
+  const { data: futureItems, error: futureError } = await db.from(
+    "race_pipeline_items",
+  ).select("initial_budget,races!inner(start_time)").eq(
+    "batch_run_id",
+    batch.id,
+  ).eq("state", "selected").gt("races.start_time", race.start_time);
+  if (futureError) throw futureError;
+  const futureReservedBudgets = (futureItems ?? []).reduce(
+    (sum: number, future: any) => sum + Number(future.initial_budget ?? 0),
+    0,
+  );
+  const wagerBudget = currentRaceBudget(
+    bankroll,
+    Number(item.initial_budget ?? 0),
+    futureReservedBudgets,
+  );
+  const { error: itemBudgetError } = await db.from("race_pipeline_items")
+    .update({
+      final_budget: wagerBudget,
+      budget_mode: bankroll.mode,
+      updated_at: nowIso(),
+    }).eq("id", item.id);
+  if (itemBudgetError) throw itemBudgetError;
   const { data: rollover } = await db.from("rollover_states").select("*").eq(
     "strategy",
     "single",
@@ -434,7 +616,7 @@ async function finalDecision(db: any, batch: any, item: any) {
   const refreshedSources = await Promise.all(
     SOURCE_PROFILES.map(async (profile) => {
       try {
-        return normalizeSourcePage(
+        const normalized = normalizeSourcePage(
           profile,
           await fetchRaceSourcePage(profile, {
             raceDate: race.race_date,
@@ -442,25 +624,55 @@ async function finalDecision(db: any, batch: any, item: any) {
             raceNumber: race.race_number,
           }),
         );
+        const verified = filterVerifiedSourceHorses(
+          normalized.horses,
+          canonical,
+        );
+        return {
+          ...normalized,
+          status: verified.horses.length
+            ? "ok" as const
+            : "unavailable" as const,
+          horses: verified.horses,
+          missingFields: verified.horses.length
+            ? []
+            : ["verified_horse_signals"],
+          identityStatus: verified.identityStatus,
+        };
       } catch (error) {
         return {
           source: profile.name,
           status: "unavailable",
+          numeric: profile.numeric,
+          horses: [],
           missingFields: [String(error)],
+          identityStatus: "failed" as const,
         };
       }
     }),
   );
   finalEvidence.push(...refreshedSources);
+  const validOdds = odds.filter((market: any) =>
+    validateMarketOdds(market).valid
+  );
   const input = {
     race: { ...race, entries: detail.entries },
+    independent_evaluation: independentEvaluation,
     external_evidence: finalEvidence,
-    market_odds: odds,
+    capital_context: {
+      capital_mode: bankroll.mode,
+      boost_allowed: bankroll.mode === "attack",
+    },
     available_paper_balance: Number(available ?? 0),
-    rollover_state: rollover,
+    wager_budget: {
+      maximum_total_stake: wagerBudget,
+      stake_unit: 100,
+      daily_loss_floor: bankroll.lossFloor,
+      active_lock_balance: bankroll.hardFloor,
+    },
+    valid_market_odds: validOdds,
     selected_reason: item.selection_reason,
     captured_at: nowIso(),
-    technical_rules: { bet_types: ["win", "place", "wide"], stake_unit: 100 },
   };
   let call = await ai(
     db,
@@ -473,21 +685,21 @@ async function finalDecision(db: any, batch: any, item: any) {
       source_names: finalEvidence.map((x) => x.source),
     },
   );
+  const runners = detail.entries.map((entry: any) => ({
+    horseNumber: Number(entry.horseNumber),
+    horseName: String(entry.horseName),
+  }));
   const technicalContext = {
     raceId: String(race.id),
-    horseNumbers: detail.entries.map((x: any) => x.horseNumber),
+    runners,
+    markets: validOdds,
+    mode: bankroll.mode,
+    maximumTotalStake: wagerBudget,
     availableBalance: Number(available ?? 0),
     saleOpen: batch.metadata?.integration_test === true ||
       Date.now() < Date.parse(race.start_time),
-    marketKeys: odds.map((x: any) =>
-      `${x.type}:${
-        [...x.horses].sort((a: number, b: number) => a - b).join("-")
-      }`
-    ),
-  };
-  let errors = validateFinalDecision(call.value, {
-    ...technicalContext,
-  });
+  } as const;
+  let errors = validateAiBetDecision(call.value, technicalContext);
   if (errors.length) {
     call = await ai(
       db,
@@ -497,9 +709,7 @@ async function finalDecision(db: any, batch: any, item: any) {
       FINAL_DECISION_SCHEMA,
       { correction_of: call.callId, errors },
     );
-    errors = validateFinalDecision(call.value, {
-      ...technicalContext,
-    });
+    errors = validateAiBetDecision(call.value, technicalContext);
   }
   if (errors.length) {
     await db.from("race_pipeline_items").update({
@@ -510,7 +720,17 @@ async function finalDecision(db: any, batch: any, item: any) {
     }).eq("id", item.id);
     return;
   }
-  const decision: any = call.value;
+  const proposal: any = call.value;
+  const selection = buildAiBetAudit(proposal, technicalContext);
+  const decision = {
+    ...proposal,
+    system_validation: {
+      capital_mode: bankroll.mode,
+      maximum_total_stake: wagerBudget,
+      validation_errors: [],
+      decisions: selection.decisions,
+    },
+  };
   if (batch.metadata?.integration_test === true) {
     const { error: testError } = await db.from(
       "prediction_integration_test_runs",
@@ -532,15 +752,61 @@ async function finalDecision(db: any, batch: any, item: any) {
     }).eq("id", item.id);
     return;
   }
-  const matched = resolveFinalMarkets(decision.bets, odds);
-  const atomicBets = await Promise.all(matched.map(async ({ bet, market }) => ({
-    ...bet,
-    odds: market.odds,
-    odds_max: market.oddsMax ?? null,
-    source_url: race.source_url,
-    captured_at: input.captured_at,
-    content_hash: await hash(market),
-  })));
+  const marketByKey = new Map(validOdds.map((market: any) => [
+    marketKey(market.type, market.horses),
+    market,
+  ]));
+  const aiBetByKey = new Map((proposal.bets ?? []).map((bet: any) => [
+    marketKey(bet.bet_type, bet.horses),
+    bet,
+  ]));
+  const atomicBets = await Promise.all(selection.purchases.map(async (bet) => {
+    const market: any = marketByKey.get(marketKey(bet.type, bet.horses));
+    if (!market) {
+      throw new Error(`MARKET_ODDS_NOT_FOUND:${bet.type}:${bet.horses}`);
+    }
+    const aiBet: any = aiBetByKey.get(marketKey(bet.type, bet.horses));
+    return {
+      bet_type: bet.type,
+      horses: bet.horses,
+      stake: bet.stake,
+      reason: aiBet.reason,
+      stake_reason: aiBet.stake_reason,
+      odds: market.odds,
+      odds_max: market.oddsMax ?? null,
+      raw_probability: bet.rawProbability,
+      calibrated_probability: bet.calibratedProbability,
+      expected_value: bet.expectedValue,
+      ticket_score: bet.ticketScore,
+      confidence_grade: bet.confidence,
+      source_url: race.source_url,
+      captured_at: input.captured_at,
+      content_hash: await hash(market),
+    };
+  }));
+  const auditDecisions = selection.decisions.map((bet) => ({
+    bet_type: bet.type,
+    horses: bet.horses,
+    proposed_stake: bet.stake,
+    final_stake: bet.decision === "purchased" ? bet.stake : 0,
+    odds: bet.odds,
+    odds_max: bet.oddsMax,
+    raw_probability: bet.rawProbability,
+    calibrated_probability: bet.calibratedProbability,
+    expected_value: bet.expectedValue,
+    minimum_expected_value: bet.minimumExpectedValue,
+    confidence_grade: bet.confidence,
+    ticket_score: bet.ticketScore,
+    decision: bet.decision,
+    reason_code: bet.reasonCode,
+    reason_detail: bet.reasonDetail,
+  }));
+  const confidenceNumber =
+    ({ S: 95, A: 90, B: 85, C: 75 } as Record<string, number>)[
+      proposal.overall_confidence
+    ] ?? 75;
+  const action = proposal.action === "BET" ? "bet" : "skip";
+  const reason = proposal.reason;
   const predictedAt = nowIso();
   const { error: finalizeError } = await db.rpc(
     "finalize_prediction_decision",
@@ -550,14 +816,15 @@ async function finalDecision(db: any, batch: any, item: any) {
       p_race_id: race.id,
       p_strategy: "single",
       p_ai_call_id: call.callId,
-      p_action: decision.action === "BET" ? "bet" : "skip",
-      p_confidence: decision.confidence,
-      p_reason: decision.reason,
+      p_action: action,
+      p_confidence: confidenceNumber,
+      p_reason: reason,
       p_input_hash: call.inputHash,
       p_prediction_hash: await hash(decision),
       p_predicted_at: predictedAt,
       p_raw_response: decision,
       p_bets: atomicBets,
+      p_decisions: auditDecisions,
     },
   );
   if (finalizeError) throw finalizeError;
@@ -585,7 +852,8 @@ Deno.serve(async (req) => {
     const { error: expireError } = await db.from("race_pipeline_items").update({
       state: "failed",
       next_action_at: null,
-      last_error: "FINAL_DECISION_WINDOW_EXPIRED: selected race reached its start time before final decision",
+      last_error:
+        "FINAL_DECISION_WINDOW_EXPIRED: selected race reached its start time before final decision",
       updated_at: nowIso(),
     }).in("id", expiredIds);
     if (expireError) return json({ error: expireError.message }, 500);

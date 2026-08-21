@@ -1,4 +1,5 @@
 import {
+  filterVerifiedSourceHorses,
   identitySummary,
   normalizeHorseName,
   verifySourceIdentities,
@@ -48,4 +49,29 @@ Deno.test("duplicate source horse numbers are rejected", () => {
     [{ horseNumber: 4, horseName: "アルファスター" }],
   );
   assert(checks[1].reason === "DUPLICATE_SOURCE_HORSE_NUMBER", "duplicate accepted");
+});
+
+Deno.test("verified horse filtering keeps valid signals and reports partial evidence", () => {
+  const filtered = filterVerifiedSourceHorses(
+    [
+      { horseNumber: 4, horseName: "アルファスター", rank: 1 },
+      { horseNumber: 5, horseName: "別の馬", rank: 2 },
+    ],
+    [
+      { horseNumber: 4, horseName: "アルファスター" },
+      { horseNumber: 5, horseName: "ベータスター" },
+    ],
+  );
+  assert(filtered.horses.length === 1, "mismatched signal was not removed");
+  assert(filtered.horses[0].horseNumber === 4, "valid signal was removed");
+  assert(filtered.identityStatus === "partial", "partial status missing");
+});
+
+Deno.test("verified horse filtering rejects an entirely mismatched source", () => {
+  const filtered = filterVerifiedSourceHorses(
+    [{ horseNumber: 9, horseName: "不明馬" }],
+    [{ horseNumber: 4, horseName: "アルファスター" }],
+  );
+  assert(filtered.horses.length === 0, "mismatched source was accepted");
+  assert(filtered.identityStatus === "failed", "failed status missing");
 });

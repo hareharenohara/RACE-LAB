@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1.0.14";
 import {
   discoverRaceLink,
+  extractAthenaRaceSection,
   hasEvidenceQuorum,
   normalizeSourcePage,
   SOURCE_PROFILES,
@@ -65,7 +66,7 @@ Deno.test("parses muryou-keiba-ai race table", () => {
 
 Deno.test("parses uma-x overall table", () => {
   const html =
-    `<table><tr><th>馬名</th><th>総合</th><th>SP</th><th>AG</th><th>実績</th></tr><tr><td>10ナムラクララ</td><td>58</td><td>55</td><td>49</td><td>44</td></tr></table>`;
+    `<a href="/race_aredo/7?race_id=test">荒れ度</a><table><tr><th>馬名</th><th>総合</th><th>SP</th><th>AG</th><th>実績</th></tr><tr><td>10ナムラクララ</td><td>58</td><td>55</td><td>49</td><td>44</td></tr></table>`;
   const result = normalizeSourcePage(SOURCE_PROFILES[2], {
     html,
     url: "x",
@@ -77,6 +78,11 @@ Deno.test("parses uma-x overall table", () => {
     horseName: "ナムラクララ",
     rawScore: 58,
     rank: 1,
+  });
+  assertEquals(result.raceMetrics, {
+    roughness: 7,
+    roughnessScale: "1-18",
+    roughnessBasis: "odds-derived",
   });
 });
 
@@ -96,6 +102,44 @@ Deno.test("parses kichiuma SP table", () => {
     comment: "◎",
     rank: 1,
   });
+});
+Deno.test("extracts and parses only the requested ATHENA race", () => {
+  const html = `<h2>中京</h2>
+    <div class="su-box-title">01R 2歳未勝利</div>
+    <table><tr><th>番</th><th>馬名</th><th>性齢</th><th>騎手</th><th>オッズ</th><th>人気</th><th>予想勝率 (AI指数)</th><th>予想着順</th></tr>
+    <tr><td>5</td><td>バクソウシャチョウ<br>Charlatan</td><td>牡2</td><td>団野</td><td>4.3</td><td>3</td><td>20.663 % (743)</td><td>1</td></tr></table>
+    <div class="su-box-title">02R 2歳新馬</div>
+    <table><tr><td>3</td><td>別レース馬</td><td>x</td><td>x</td><td>2</td><td>1</td><td>10 % (999)</td><td>1</td></tr></table>
+    <h2>札幌</h2>`;
+  const section = extractAthenaRaceSection(html, "中京", 1);
+  const result = normalizeSourcePage(SOURCE_PROFILES[4], {
+    html: section,
+    url: "https://keiba-ai.jp/archives/test",
+    route: "direct",
+    capturedAt: "x",
+  });
+  assertEquals(result.horses, [{
+    horseNumber: 5,
+    horseName: "バクソウシャチョウ",
+    rawScore: 743,
+    rank: 1,
+  }]);
+});
+
+Deno.test("parses keiba-navi index table", () => {
+  const html = `<table><tr><th>枠番</th><th>馬番</th><th>馬名</th><th>オッズ</th><th>ナビ指数</th></tr>
+    <tr><td>1</td><td>1</td><td><b><a href="/horse/1">テンレッドサン</a></b><br><span>牝3</span></td><td>4.8</td><td>3</td></tr>
+    <tr><td>3</td><td>3</td><td><b><a href="/horse/3">ウォータースパウト</a></b></td><td>9.0</td><td>16</td></tr></table>`;
+  const result = normalizeSourcePage(SOURCE_PROFILES[5], {
+    html,
+    url: "https://m-jockey.co.jp/test",
+    route: "direct",
+    capturedAt: "x",
+  });
+  assertEquals(
+    result.horses.map((x) => [x.horseNumber, x.horseName, x.rawScore]),
+    [[3, "ウォータースパウト", 16], [1, "テンレッドサン", 3]],
+  );
 });
 Deno.test("quorum needs two sources and a numeric source", () => {
   const base = {
