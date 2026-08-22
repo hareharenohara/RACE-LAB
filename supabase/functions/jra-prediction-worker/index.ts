@@ -33,7 +33,11 @@ import {
   buildAiBetAudit,
   validateAiBetDecision,
 } from "../_shared/ai-bet-decision.ts";
-import { validateMarketOdds } from "../_shared/odds-validation.ts";
+import {
+  oddsHighForStorage,
+  validateMarketOdds,
+} from "../_shared/odds-validation.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 import { buildRaceSelectionMarket } from "../_shared/race-selection-market.ts";
 import {
   allocateDailyRiskBudget,
@@ -99,7 +103,7 @@ async function ai(
   } catch (error) {
     await db.from("ai_calls").update({
       status: "failed",
-      error_message: String(error),
+      error_message: errorMessage(error),
       completed_at: nowIso(),
     }).eq("id", callId);
     throw error;
@@ -348,7 +352,10 @@ async function selectRaces(db: any, batch: any) {
     };
   }
   const provider = new JraProvider();
-  const refreshedMarkets = new Map<string, ReturnType<typeof buildRaceSelectionMarket>>();
+  const refreshedMarkets = new Map<
+    string,
+    ReturnType<typeof buildRaceSelectionMarket>
+  >();
   await Promise.all(items.map(async (item: any) => {
     try {
       const detail = await provider.getDetail(summaryFrom(item.races));
@@ -554,7 +561,7 @@ async function finalDecision(db: any, batch: any, item: any) {
   } catch (error) {
     independentEvaluation = {
       status: "unavailable",
-      reason: String(error),
+      reason: errorMessage(error),
       evaluations: [],
     };
   }
@@ -645,7 +652,7 @@ async function finalDecision(db: any, batch: any, item: any) {
           status: "unavailable",
           numeric: profile.numeric,
           horses: [],
-          missingFields: [String(error)],
+          missingFields: [errorMessage(error)],
           identityStatus: "failed" as const,
         };
       }
@@ -773,7 +780,7 @@ async function finalDecision(db: any, batch: any, item: any) {
       reason: aiBet.reason,
       stake_reason: aiBet.stake_reason,
       odds: market.odds,
-      odds_max: market.oddsMax ?? null,
+      odds_max: oddsHighForStorage(market),
       raw_probability: bet.rawProbability,
       calibrated_probability: bet.calibratedProbability,
       expected_value: bet.expectedValue,
@@ -790,7 +797,10 @@ async function finalDecision(db: any, batch: any, item: any) {
     proposed_stake: bet.stake,
     final_stake: bet.decision === "purchased" ? bet.stake : 0,
     odds: bet.odds,
-    odds_max: bet.oddsMax,
+    odds_max: oddsHighForStorage({
+      type: bet.type,
+      oddsMax: bet.oddsMax,
+    }),
     raw_probability: bet.rawProbability,
     calibrated_probability: bet.calibratedProbability,
     expected_value: bet.expectedValue,
@@ -908,7 +918,7 @@ Deno.serve(async (req) => {
         try {
           await finalDecision(db, batch, selected);
         } catch (error) {
-          const message = String(error);
+          const message = errorMessage(error);
           const { error: itemError } = await db.from("race_pipeline_items")
             .update({
               state: "failed",
@@ -935,8 +945,7 @@ Deno.serve(async (req) => {
           terminalError = `PIPELINE_COMPLETED_WITH_${issueCount}_ITEM_ERRORS`;
         }
         metadata = { ...metadata, pipeline_stage: "complete" };
-      }
-      else {
+      } else {
         await db.rpc("release_prediction_worker_lease", {
           p_batch_run_id: batch.id,
           p_lease_id: leaseId,
@@ -962,13 +971,13 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     await db.from("batch_runs").update({
-      error_message: String(error),
-      metadata: { ...batch.metadata, last_error: String(error) },
+      error_message: errorMessage(error),
+      metadata: { ...batch.metadata, last_error: errorMessage(error) },
     }).eq("id", batch.id);
     await db.rpc("release_prediction_worker_lease", {
       p_batch_run_id: batch.id,
       p_lease_id: leaseId,
     });
-    return json({ error: "PIPELINE_ERROR", detail: String(error) }, 500);
+    return json({ error: "PIPELINE_ERROR", detail: errorMessage(error) }, 500);
   }
 });

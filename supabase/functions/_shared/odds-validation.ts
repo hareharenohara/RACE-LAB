@@ -24,3 +24,13 @@ export function validateMarketOdds(market: {
   }
   return { valid: true, reason: null };
 }
+
+/** Fixed-price markets sometimes arrive with oddsMax=0 as a provider placeholder. */
+export function oddsHighForStorage(market: {
+  type: string;
+  oddsMax?: number | null;
+}): number | null {
+  if (!["place", "wide"].includes(market.type)) return null;
+  const high = Number(market.oddsMax);
+  return Number.isFinite(high) && high > 0 ? high : null;
+}
