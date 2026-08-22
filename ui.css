@@ -69,3 +69,9 @@
  button,select,input,summary,a,[data-open-call],[data-page-target]{touch-action:manipulation}summary{min-height:44px;padding:12px}pre{max-width:100%;font-size:10px}
 }
 @media(max-width:380px){.sidebar nav button{font-size:9px}.header-actions{gap:4px}.install-button{padding:7px 9px;font-size:10px}.metrics{grid-template-columns:1fr}.status-metrics{grid-template-columns:1fr 1fr}.performance-head{display:grid}.performance-head>span{justify-self:start}.money-grid{grid-template-columns:1fr}.money-grid>div{display:flex;align-items:center;justify-content:space-between}}
+
+@media(max-width:720px){
+ .status-board .command-status{order:1}.status-board .next-action{order:2}.status-board .status-metrics{order:3}.next-action{background:#164532}.next-action>small{font-size:10px;font-weight:900;letter-spacing:.08em}.next-action strong{font-size:17px}
+ .dashboard-grid{display:flex;flex-direction:column;gap:12px}.dashboard-main,.dashboard-side{display:contents}.dashboard-side>article{order:1}#dashboard-timeline{order:2}.dashboard-main>.dashboard-section{order:3}#dashboard-alerts{order:4}#dashboard-notifications{order:5}
+ .flow-steps{border-top:1px solid var(--line);padding-top:10px}.candidate-heading .eyebrow{color:var(--green)}
+}
