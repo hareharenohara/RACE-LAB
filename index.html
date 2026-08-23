@@ -40,21 +40,15 @@
     <div class="sidebar-foot"><i></i> ペーパー運用中<small>候補抽出 07:00・直前更新 T-20・結果 3分間隔</small><button id="logout">ログアウト</button></div>
   </aside>
   <main>
-    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">概要</h1></div><div class="header-actions"><button id="pwa-install" class="install-button" hidden>アプリをインストール</button><div class="header-meta"><span>GEMINI ADAPTIVE V2</span><b id="last-run">データ読込中</b></div></div></header>
+    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title" hidden>概要</h1></div><div class="header-actions"><button id="pwa-install" class="install-button" hidden>アプリをインストール</button><div class="header-meta"><span>GEMINI ADAPTIVE V2</span><b id="last-run">データ読込中</b></div></div></header>
     <div id="pwa-update" class="update-toast" hidden><span>新しいバージョンを利用できます</span><button>今すぐ更新</button></div>
     <div id="error" class="error" hidden></div>
     <section id="dashboard" class="page active">
-      <div id="dashboard-command"></div>
-      <div class="dashboard-grid">
-        <div class="dashboard-main">
-          <div id="dashboard-timeline"></div>
-          <section class="dashboard-section"><div class="section-heading"><div><p class="eyebrow">PURCHASES & RESULTS</p><h2>購入・結果 <button type="button" class="inline-help" data-metric-help data-help-title="購入・結果" data-help-copy="Geminiが購入を決めたレースと、発走後に取得した結果を表示します。結果確定前の損益は未確定として扱います。" data-help-current="右上に購入レース数と結果確定数を表示しています。">?</button></h2></div><span id="purchased-count" class="section-count"></span></div><div id="dashboard-races" class="dashboard-races"></div></section>
-        </div>
-        <aside class="dashboard-side">
-          <div id="dashboard-notifications"></div>
-          <div id="dashboard-alerts"></div>
-          <article class="panel compact-panel"><div class="panel-title"><h2>本日の収支 <button type="button" class="inline-help" data-metric-help data-help-title="本日の収支と目標" data-help-copy="当日開始時のペーパー残高に対する確定損益の割合です。目標は+2.25%。結果待ちの馬券は勝ち負けが確定するまで含めません。" data-help-current="目標額、確定損益、目標との差額を同じカードで比較できます。">?</button></h2><span>目標 +2.25%</span></div><div id="dashboard-money"></div></article>
-        </aside>
+      <div class="dashboard-overview-stack">
+        <div id="dashboard-timeline"></div>
+        <article class="dashboard-section"><div class="panel-title"><h2>本日の収支 <button type="button" class="inline-help" data-metric-help data-help-title="本日の収支と目標" data-help-copy="当日開始時のペーパー残高に対する確定損益の割合です。目標は+2.25%。結果待ちの馬券は勝ち負けが確定するまで含めません。" data-help-current="目標額、確定損益、目標との差額を同じカードで比較できます。">?</button></h2><span>目標 +2.25%</span></div><div id="dashboard-money"></div></article>
+        <div id="dashboard-command"></div>
+        <div class="dashboard-status-details"><div id="dashboard-alerts"></div><div id="dashboard-notifications"></div></div>
       </div>
       <details class="legacy-dashboard"><summary>残高・バッチ詳細</summary><div class="strategy-grid" id="strategy-cards"></div><div class="pipeline-summary" id="pipeline-summary"></div><div class="two-col"><article class="panel"><div class="panel-title"><h2>AI運用資金</h2><span>現在残高</span></div><div id="balance-bars"></div></article><article class="panel"><div class="panel-title"><h2>最新バッチ</h2><span class="ok">監視中</span></div><div id="job-list"></div></article></div></details>
       <strong id="total-profit" hidden>—</strong>
