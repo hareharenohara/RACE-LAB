@@ -40,7 +40,7 @@
     <div class="sidebar-foot"><i></i> ペーパー運用中<small>候補抽出 07:00・直前更新 T-20・結果 3分間隔</small><button id="logout">ログアウト</button></div>
   </aside>
   <main>
-    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">概要</h1></div><div class="header-actions"><button id="refresh-data" class="install-button">更新</button><button id="pwa-install" class="install-button" hidden>アプリをインストール</button><div class="header-meta"><span>GEMINI ADAPTIVE V2</span><b id="last-run">データ読込中</b></div></div></header>
+    <header><div><p class="eyebrow" id="today-label"></p><h1 id="page-title">概要</h1></div><div class="header-actions"><button id="pwa-install" class="install-button" hidden>アプリをインストール</button><div class="header-meta"><span>GEMINI ADAPTIVE V2</span><b id="last-run">データ読込中</b></div></div></header>
     <div id="pwa-update" class="update-toast" hidden><span>新しいバージョンを利用できます</span><button>今すぐ更新</button></div>
     <div id="error" class="error" hidden></div>
     <section id="dashboard" class="page active">
@@ -87,6 +87,6 @@
       <p class="guide-updated">このページは現在の Adaptive V2 の実装に基づいています。</p>
     </section>
   </main>
-  <script src="./analytics-core.js"></script><script src="./app.js"></script><script>document.getElementById("refresh-data").addEventListener("click",load)</script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js" integrity="sha384-l8ah+VgaWtk1mvOe9VC+OirC6qHFF4yH7l7mKRidV9MSti3E9F463bMp6ZVN4kuC" crossorigin="anonymous"></script><script src="./analytics-core.js"></script><script src="./app.js"></script>
 </body>
 </html>
