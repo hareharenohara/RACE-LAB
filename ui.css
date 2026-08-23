@@ -88,3 +88,53 @@
  .dashboard-grid{display:flex;flex-direction:column;gap:12px}.dashboard-main,.dashboard-side{display:contents}.dashboard-side>article{order:1}.dashboard-main>.dashboard-section{order:3}#dashboard-alerts{order:4}#dashboard-notifications{order:5}
  .flow-steps{border-top:1px solid var(--line);padding-top:10px}.candidate-heading .eyebrow{color:var(--green)}
 }
+
+/* Calm, consistent dashboard surfaces */
+:root{--paper:#f5f6f2;--line:#dfe5df;--shadow:0 8px 24px #1b2d2210}
+.dashboard-section,.dashboard-status-details .panel,.command-card{border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:var(--shadow)}
+.command-card{color:var(--ink);overflow:hidden}
+.command-card>div{background:#fff}
+.command-card>div+div,.status-board .next-action{border-color:var(--line)}
+.command-status .eyebrow{color:var(--green)}
+.command-status p:last-child{color:var(--muted)}
+.command-icon{background:#e5f1e9;color:#287052}
+.command-card.warning .command-icon{background:#fff0cf;color:#94631b}
+.status-metrics{background:#f7f9f7}
+.status-metrics>button{border-color:#dfe5df;background:#fff;color:var(--ink)}
+.status-metrics>button:hover,.status-metrics>button:focus-visible{border-color:#93b8a4;background:#f8fbf9}
+.status-metrics small,.status-metrics span{color:var(--muted)}
+.status-metrics small i{border-color:#b9c8bf;color:var(--green)}
+.status-metrics strong{color:var(--ink)}
+.status-metrics strong em{color:#87928b}
+.status-metrics .metric-ok strong{color:var(--green)}
+.status-metrics .metric-error strong,.status-metrics .metric-alert{color:#a56d18}
+.next-action,.status-board .next-action{background:#f2f7f4}
+.next-action small{color:var(--muted)}
+.next-action strong{color:var(--ink)}
+.next-action-link{color:var(--ink)}
+.next-action-link b{color:var(--green)}
+.next-action span{background:#dfeee4;color:#265f48}
+.next-action>span.late{background:#fff0cf;color:#87590e}
+.daily-performance,.daily-performance.achieved,.daily-performance.negative{margin-bottom:0;border:1px solid #e1e7e2;background:#f7f9f7;color:var(--ink);box-shadow:none}
+.performance-head small{color:var(--muted)}
+.performance-head strong,.daily-performance.achieved .performance-head strong{color:var(--green)}
+.daily-performance.negative .performance-head strong{color:var(--red)}
+.performance-head>span,.daily-performance.achieved .performance-head>span{background:#e7efe9;color:#426052}
+.daily-performance.negative .performance-head>span{background:#f5e8e5;color:#8e493f}
+.goal-track{background:#e3e8e4}
+.goal-track i{background:#6fa887;box-shadow:none}
+.daily-performance.negative .goal-track i{background:#c77a6c}
+.goal-track b{color:#77837c}
+.money-summary{background:var(--line)}
+.money-summary>div{background:#fff}
+.money-summary small,.money-foot,.money-foot small{color:var(--muted)}
+.money-summary b,.money-summary strong{color:var(--ink)}
+.money-summary .positive{color:var(--green)}
+.money-summary .negative{color:var(--red)}
+.race-timeline-card{border-left-color:#6f9d85;background:#fbfcfa}
+.race-timeline-card.checking{border-left-color:#7b6ca5;background:#fbfaff}
+
+@media(max-width:720px){
+ .status-board .next-action{background:#f2f7f4}
+ .dashboard-section,.dashboard-status-details .panel,.command-card{border-radius:14px}
+}
