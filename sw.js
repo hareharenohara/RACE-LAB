@@ -1,4 +1,4 @@
-const CACHE_NAME = "race-lab-shell-v30";
+const CACHE_NAME = "race-lab-shell-v31";
 const SHELL = [
   "/index.html", "/styles.css", "/ui.css", "/analytics-core.js", "/app.js",
   "/manifest.webmanifest", "/icons/icon.svg", "/icons/icon-192.png",
@@ -52,5 +52,11 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (!SHELL.includes(url.pathname)) return;
-  event.respondWith(caches.match(request).then(cached => cached || fetch(request)));
+  event.respondWith(fetch(request).then(response => {
+    if (response.ok) {
+      const copy = response.clone();
+      event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(request, copy)));
+    }
+    return response;
+  }).catch(() => caches.match(request)));
 });
