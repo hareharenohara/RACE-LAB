@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.push-config]
 verify_jwt = false
+
+[functions.jra-youtube-chat]
+verify_jwt = true
