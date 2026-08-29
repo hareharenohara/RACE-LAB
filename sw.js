@@ -1,4 +1,4 @@
-const CACHE_NAME = "race-lab-shell-v46";
+const CACHE_NAME = "race-lab-shell-v47";
 const SHELL = [
   "/index.html", "/styles.css", "/ui.css", "/analytics-core.js", "/app.js",
   "/manifest.webmanifest", "/icons/icon.svg", "/icons/icon-192.png",

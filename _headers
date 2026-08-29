@@ -3,4 +3,4 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; connect-src 'self' https://lgpvvwymvqzhoqkpuyjv.supabase.co wss://lgpvvwymvqzhoqkpuyjv.supabase.co; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com; style-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://www.youtube.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https://lgpvvwymvqzhoqkpuyjv.supabase.co wss://lgpvvwymvqzhoqkpuyjv.supabase.co; img-src 'self' data:; style-src 'self'; script-src 'self' https://cdn.jsdelivr.net; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
