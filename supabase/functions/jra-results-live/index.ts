@@ -58,13 +58,17 @@ const hash = async (value: unknown) =>
   ].map((x) => x.toString(16).padStart(2, "0")).join("");
 
 function parseResult(html: string) {
-  const $ = cheerio.load(html), finishOrder: number[] = [];
+  const $ = cheerio.load(html), finishOrder: number[] = [], popularityByHorse: Record<number, number> = {};
   $(".RaceTable01 tbody tr, .RaceTable01 tr.HorseList").each((_, row) => {
     const rank = Number($(row).find(".Rank").first().text().trim());
     const horse = Number($(row).find("td.Num.Txt_C").first().text().trim());
+    const popularity = Number($(row).find("td.Popular, td.Popularity, .Popular").first().text().trim());
     if (
       Number.isInteger(rank) && rank > 0 && Number.isInteger(horse) && horse > 0
-    ) finishOrder[rank - 1] = horse;
+    ) {
+      finishOrder[rank - 1] = horse;
+      if (Number.isInteger(popularity) && popularity > 0) popularityByHorse[horse] = popularity;
+    }
   });
   const payouts: Payout[] = [];
   $(".Payout_Detail_Table tr").each((_, row) => {
@@ -84,7 +88,7 @@ function parseResult(html: string) {
       }
     }
   });
-  return { finishOrder: finishOrder.filter(Number.isFinite), payouts };
+  return { finishOrder: finishOrder.filter(Number.isFinite), popularityByHorse, payouts };
 }
 
 const yen = (value: number) => `¥${Math.round(value).toLocaleString("ja-JP")}`;
@@ -192,7 +196,7 @@ Deno.serve(async (req) => {
       await db.from("race_results").upsert({
         race_id: race.id,
         finish_order: parsed.finishOrder,
-        result_json: { provider: "netkeiba", payouts: parsed.payouts },
+        result_json: { provider: "netkeiba", payouts: parsed.payouts, popularity_by_horse: parsed.popularityByHorse },
         confirmed_at: new Date().toISOString(),
         source_hash: sourceHash,
       }, { onConflict: "race_id" });
