@@ -62,7 +62,7 @@ function parseResult(html: string) {
   $(".RaceTable01 tbody tr, .RaceTable01 tr.HorseList").each((_, row) => {
     const rank = Number($(row).find(".Rank").first().text().trim());
     const horse = Number($(row).find("td.Num.Txt_C").first().text().trim());
-    const popularity = Number($(row).find("td.Popular, td.Popularity, .Popular").first().text().trim());
+    const popularity = Number($(row).find(".OddsPeople").first().text().trim());
     if (
       Number.isInteger(rank) && rank > 0 && Number.isInteger(horse) && horse > 0
     ) {
@@ -164,13 +164,24 @@ Deno.serve(async (req) => {
   const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
     .slice(0, 10);
-  const { data: races, error } = await db.from("races").select(
-    "id,external_id,race_date,track,race_number,race_name,start_time,status",
+  const { data: recentRaces, error } = await db.from("races").select(
+    "id,external_id,race_date,track,race_number,race_name,start_time,status,race_results(result_json)",
   ).like("external_id", "jra:%").gte("race_date", since).lt(
     "start_time",
     cutoff,
-  ).neq("status", "finished").order("start_time").limit(12);
+  ).order("start_time", { ascending: false }).limit(100);
   if (error) return json({ error: error.message }, 500);
+  const races = (recentRaces ?? []).filter((race) => {
+    if (race.status !== "finished") return true;
+    const result = Array.isArray(race.race_results)
+      ? race.race_results[0]
+      : race.race_results;
+    const popularities = result?.result_json?.popularity_by_horse;
+    return !popularities || Object.keys(popularities).length === 0;
+  }).sort((a, b) =>
+    Number(a.status === "finished") - Number(b.status === "finished") ||
+    Date.parse(a.start_time) - Date.parse(b.start_time)
+  ).slice(0, 12);
   let checked = 0, settledRaces = 0, settledBets = 0, pending = 0;
   for (const race of races ?? []) {
     checked++;
